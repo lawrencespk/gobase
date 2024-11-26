@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # GoBase
 
 GoBase is a foundational Go library that provides robust implementations for logging and message queue systems.
@@ -12,3 +13,6 @@ GoBase is a foundational Go library that provides robust implementations for log
 - Extensible through adapters
 
 ## Installation
+=======
+# gobase
+>>>>>>> 4aed9f5b7aee197b67540449ec3b060e1942ec2d
