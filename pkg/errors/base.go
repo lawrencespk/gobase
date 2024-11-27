@@ -59,6 +59,11 @@ func (e *baseError) WithDetails(details ...interface{}) types.Error {
 	return e
 }
 
+// Stack 获取堆栈信息
+func (e *baseError) Stack() []string {
+	return e.stack
+}
+
 // captureStack 捕获堆栈信息
 func (e *baseError) captureStack() {
 	const depth = 32
