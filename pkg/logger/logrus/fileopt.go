@@ -77,8 +77,36 @@ func (fm *FileManager) WriteToFile(filename string, p []byte) (n int, err error)
 	handle.mu.Lock()
 	defer handle.mu.Unlock()
 
+	// 写入缓冲区
+	n, err = handle.buffer.Write(p)
+	if err != nil {
+		return n, err
+	}
+
+	// 如果缓冲区超过阈值，立即刷新
+	if handle.buffer.Len() >= fm.opts.BufferSize {
+		if err := fm.flushHandle(handle); err != nil {
+			return n, err
+		}
+	}
+
 	handle.lastUse = time.Now()
-	return handle.buffer.Write(p)
+	return n, nil
+}
+
+// flushHandle 刷新指定句柄的缓冲区
+func (fm *FileManager) flushHandle(handle *FileHandle) error {
+	if handle.buffer.Len() > 0 {
+		_, err := handle.buffer.WriteTo(handle.file)
+		if err != nil {
+			return err
+		}
+		// 确保写入磁盘
+		if err := handle.file.Sync(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // getHandle 获取文件句柄
@@ -136,9 +164,7 @@ func (fm *FileManager) flushAll() {
 
 	for _, handle := range fm.files {
 		handle.mu.Lock()
-		if handle.buffer.Len() > 0 {
-			handle.buffer.WriteTo(handle.file)
-		}
+		fm.flushHandle(handle)
 		handle.mu.Unlock()
 	}
 }
@@ -177,7 +203,7 @@ func (fm *FileManager) Close() error {
 
 	for _, handle := range fm.files {
 		handle.mu.Lock()
-		handle.buffer.WriteTo(handle.file)
+		fm.flushHandle(handle)
 		handle.file.Close()
 		fm.pool.Put(handle.buffer)
 		handle.mu.Unlock()

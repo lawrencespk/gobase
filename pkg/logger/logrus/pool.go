@@ -42,7 +42,8 @@ func NewWritePool(size int) *WritePool {
 	return &WritePool{
 		pool: sync.Pool{
 			New: func() interface{} {
-				return make([]byte, 0, size)
+				buf := make([]byte, 0, size)
+				return &buf
 			},
 		},
 	}
@@ -50,10 +51,11 @@ func NewWritePool(size int) *WritePool {
 
 // Get 从池中获取一个写入缓冲区
 func (p *WritePool) Get() []byte {
-	return p.pool.Get().([]byte)
+	return *(p.pool.Get().(*[]byte))
 }
 
 // Put 将写入缓冲区放回池中
 func (p *WritePool) Put(buf []byte) {
+	buf = buf[:0] // 重置缓冲区
 	p.pool.Put(&buf)
 }

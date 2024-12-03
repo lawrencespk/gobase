@@ -79,10 +79,14 @@ func (w *AsyncWriter) start() {
 
 // Stop 停止异步写入
 func (w *AsyncWriter) Stop() error {
-	close(w.done)
 	if w.config.FlushOnExit {
-		return w.Flush()
+		// 先刷新数据
+		if err := w.Flush(); err != nil {
+			return err
+		}
 	}
+	// 再关闭通道
+	close(w.done)
 	w.wg.Wait()
 	return nil
 }
@@ -93,17 +97,17 @@ func (w *AsyncWriter) Flush() error {
 		return nil
 	}
 
-	done := make(chan struct{})
-	go func() {
-		w.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return nil
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("flush timeout")
+	// 直接处理缓冲区中的数据
+	for {
+		select {
+		case data := <-w.buffer:
+			if _, err := w.writer.Write(data); err != nil {
+				return err
+			}
+		default:
+			// 缓冲区已空
+			return nil
+		}
 	}
 }
 

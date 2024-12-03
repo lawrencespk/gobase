@@ -1,6 +1,7 @@
 package unit
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -97,7 +98,7 @@ func TestFileManager(t *testing.T) {
 			}
 
 			expectedLines := writes
-			actualLines := len(filepath.SplitList(string(content)))
+			actualLines := bytes.Count(content, []byte("\n"))
 			if actualLines != expectedLines {
 				t.Errorf("File %d: expected %d lines, got %d", i, expectedLines, actualLines)
 			}
@@ -181,7 +182,7 @@ func TestFileManager(t *testing.T) {
 		}
 
 		expectedLines := workers * iterations
-		actualLines := len(filepath.SplitList(string(content)))
+		actualLines := bytes.Count(content, []byte("\n"))
 		if actualLines != expectedLines {
 			t.Errorf("Expected %d lines, got %d", expectedLines, actualLines)
 		}

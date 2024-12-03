@@ -42,7 +42,7 @@ func NewLogger(fm *FileManager, config QueueConfig, options *Options) (*logrusLo
 
 	// 配置logrus
 	l.logger.SetLevel(convertLevel(options.Level)) // 设置日志级别
-	l.logger.SetFormatter(newFormatter(options))   // 设置格式化器
+	l.logger.SetFormatter(newFormatter(options))   // 使用自定义格式化器
 	l.logger.SetReportCaller(true)                 // 设置调用者
 
 	// 设置输出
