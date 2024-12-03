@@ -17,6 +17,7 @@ type CompressConfig struct {
 	Level        int           // 压缩级别
 	DeleteSource bool          // 压缩后是否删除源文件
 	Interval     time.Duration // 压缩检查间隔
+	LogPaths     []string      // 需要监控的日志路径
 }
 
 // LogCompressor 日志压缩器
@@ -64,7 +65,7 @@ func (c *LogCompressor) run() {
 
 // compressOldLogs 压缩旧日志文件
 func (c *LogCompressor) compressOldLogs() {
-	for _, path := range defaultOptions.OutputPaths { // 遍历输出路径
+	for _, path := range c.config.LogPaths { // 使用配置中的路径
 		if path == "stdout" || path == "stderr" { // 跳过标准输出和标准错误
 			continue
 		}
@@ -94,21 +95,27 @@ func (c *LogCompressor) compressFile(filename string) error {
 	// 打开源文件
 	source, err := os.Open(filename) // 打开源文件
 	if err != nil {
-		return fmt.Errorf("open source file error: %v", err) // 打印错误
+		return fmt.Errorf("open source file error: %v", err) // 如果打开失败，返回错误
 	}
-	defer source.Close()
+
+	// 读取所有内容并立即关闭源文件
+	content, err := io.ReadAll(source) // 读取所有内容
+	source.Close()                     // 立即关闭源文件
+	if err != nil {
+		return fmt.Errorf("read source file error: %v", err) // 如果读取失败，返回错误
+	}
 
 	// 创建目标文件
 	target, err := os.Create(filename + ".gz") // 创建目标文件
 	if err != nil {
-		return fmt.Errorf("create target file error: %v", err) // 打印错误
+		return fmt.Errorf("create target file error: %v", err) // 如果创建失败，返回错误
 	}
-	defer target.Close() // 关闭目标文件
+	defer target.Close()
 
 	// 创建gzip写入器
 	gw, err := gzip.NewWriterLevel(target, c.config.Level) // 创建gzip写入器
 	if err != nil {
-		return fmt.Errorf("create gzip writer error: %v", err) // 打印错误
+		return fmt.Errorf("create gzip writer error: %v", err) // 如果创建失败，返回错误
 	}
 	defer gw.Close()
 
@@ -116,15 +123,24 @@ func (c *LogCompressor) compressFile(filename string) error {
 	gw.Header.Name = filepath.Base(filename) // 设置文件名
 	gw.Header.ModTime = time.Now()           // 设置修改时间
 
-	// 复制文件内容
-	if _, err := io.Copy(gw, source); err != nil { // 复制文件内容
-		return fmt.Errorf("copy file content error: %v", err) // 打印错误
+	// 写入内容
+	if _, err := gw.Write(content); err != nil {
+		return fmt.Errorf("write content error: %v", err) // 如果写入失败，返回错误
 	}
 
-	// 如果配置了删除源文件
+	// 确保所有内容都已写入
+	if err := gw.Close(); err != nil {
+		return fmt.Errorf("close gzip writer error: %v", err) // 如果关闭失败，返回错误
+	}
+
+	if err := target.Close(); err != nil {
+		return fmt.Errorf("close target file error: %v", err) // 如果关闭失败，返回错误
+	}
+
+	// 删除源文件
 	if c.config.DeleteSource {
-		if err := os.Remove(filename); err != nil { // 删除源文件
-			return fmt.Errorf("remove source file error: %v", err) // 打印错误
+		if err := os.Remove(filename); err != nil {
+			return fmt.Errorf("remove source file error: %v", err) // 如果删除失败，返回错误
 		}
 	}
 
