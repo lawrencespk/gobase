@@ -86,7 +86,7 @@ func TestWriteQueue(t *testing.T) {
 		}
 	})
 
-	t.Run("Queue Full Behavior", func(t *testing.T) {
+	t.Run("Queue_Full_Behavior", func(t *testing.T) {
 		writer := NewMockWriter()
 		writer.delay = time.Millisecond * 10
 
@@ -106,8 +106,11 @@ func TestWriteQueue(t *testing.T) {
 		var writeErrors int
 		for i := 0; i < 100; i++ {
 			_, err := queue.Write([]byte("test"))
-			if err != nil && !logrus.IsQueueFullError(err) {
-				t.Errorf("Expected queue full error, got %v", err)
+			if err != nil {
+				if !logrus.IsQueueFullError(err) {
+					t.Errorf("Expected queue full error, got %v", err)
+				}
+				writeErrors++
 			}
 		}
 

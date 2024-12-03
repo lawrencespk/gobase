@@ -24,6 +24,7 @@ type Options struct {
 	CleanupConfig    CleanupConfig  // 清理配置
 	AsyncConfig      AsyncConfig    // 异步配置
 	RecoveryConfig   RecoveryConfig // 恢复配置
+	QueueConfig      QueueConfig    // 队列配置 (使用 queue.go 中的定义)
 }
 
 var defaultOptions = &Options{
@@ -64,6 +65,16 @@ var defaultOptions = &Options{
 		RetryInterval:    time.Second, // 默认重试间隔为 1 秒
 		EnableStackTrace: true,        // 默认启用堆栈跟踪
 		MaxStackSize:     4096,        // 默认最大堆栈大小为 4096
+	},
+	QueueConfig: QueueConfig{
+		MaxSize:         1000,             // 默认队列最大大小为 1000
+		BatchSize:       100,              // 默认批处理大小为 100
+		Workers:         1,                // 默认工作协程数量为 1
+		FlushInterval:   time.Second,      // 默认刷新间隔为 1 秒
+		RetryCount:      3,                // 默认重试次数为 3
+		RetryInterval:   time.Second,      // 默认重试间隔为 1 秒
+		MaxBatchWait:    time.Second * 5,  // 默认最大批处理等待时间为 5 秒
+		ShutdownTimeout: time.Second * 10, // 默认关闭超时时间为 10 秒
 	},
 }
 
@@ -175,5 +186,45 @@ func WithCleanup(config CleanupConfig) Option {
 func WithRecovery(config RecoveryConfig) Option {
 	return func(o *Options) {
 		o.RecoveryConfig = config
+	}
+}
+
+// DefaultOptions 返回默认选项
+func DefaultOptions() *Options {
+	return &Options{
+		Level:       types.InfoLevel,    // 默认日志级别为 info
+		OutputPaths: []string{"stdout"}, // 默认输出路径为 stdout
+		QueueConfig: QueueConfig{
+			MaxSize:         1000,             // 默认队列最大大小为 1000
+			BatchSize:       100,              // 默认批处理大小为 100
+			Workers:         1,                // 默认工作协程数量为 1
+			FlushInterval:   time.Second,      // 默认刷新间隔为 1 秒
+			RetryCount:      3,                // 默认重试次数为 3
+			RetryInterval:   time.Second,      // 默认重试间隔为 1 秒
+			MaxBatchWait:    time.Second * 5,  // 默认最大批处理等待时间为 5 秒
+			ShutdownTimeout: time.Second * 10, // 默认关闭超时时间为 10 秒
+		},
+		CompressConfig: CompressConfig{
+			Enable:    false,  // 默认不启用压缩
+			Algorithm: "gzip", // 默认压缩算法为 gzip
+			Level:     6,      // 默认压缩级别为 6
+		},
+		CleanupConfig: CleanupConfig{
+			Enable:     false,          // 默认不启用清理
+			MaxAge:     7,              // 默认日志文件最大保留天数为 7
+			MaxBackups: 5,              // 默认保留的旧日志文件个数为 5
+			Interval:   time.Hour * 24, // 默认清理检查间隔为 24 小时
+		},
+		AsyncConfig: AsyncConfig{
+			Enable:        false,       // 默认不启用异步写入
+			BufferSize:    1024,        // 默认缓冲区大小为 1024
+			FlushInterval: time.Second, // 默认刷新间隔为 1 秒
+		},
+		RecoveryConfig: RecoveryConfig{
+			Enable:        false,       // 默认不启用恢复
+			MaxRetries:    3,           // 默认最大重试次数为 3
+			RetryInterval: time.Second, // 默认重试间隔为 1 秒
+			MaxStackSize:  4096,        // 默认最大堆栈大小为 4096
+		},
 	}
 }

@@ -389,13 +389,3 @@ func convertLevel(level types.Level) logrus.Level {
 		return logrus.InfoLevel
 	}
 }
-
-// ValidateLevel 验证日志级别是否有效
-func ValidateLevel(level string) bool {
-	switch level {
-	case "debug", "info", "warn", "error", "fatal":
-		return true
-	default:
-		return false
-	}
-}

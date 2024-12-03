@@ -1,66 +1,80 @@
 package logrus
 
 import (
-	"compress/gzip"
+	"errors"
 	"fmt"
-	"gobase/pkg/logger/types"
-	"time"
+	"strings"
 )
 
-// ValidateOptions 验证所有配置选项
+// ValidateOptions 验证日志选项
 func ValidateOptions(opts *Options) error {
-	if opts == nil {
-		return fmt.Errorf("options cannot be nil")
-	}
-
-	// 验证基础配置
+	// 基本选项验证
 	if err := validateBasicOptions(opts); err != nil {
 		return fmt.Errorf("basic options validation failed: %v", err)
 	}
 
-	// 验证压缩配置
-	if err := validateCompressConfig(&opts.CompressConfig); err != nil {
-		return fmt.Errorf("compress config validation failed: %v", err)
+	// 压缩配置验证
+	if opts.CompressConfig.Enable {
+		if err := validateCompressConfig(&opts.CompressConfig); err != nil {
+			return fmt.Errorf("compress config validation failed: %v", err)
+		}
 	}
 
-	// 验证清理配置
-	if err := validateCleanupConfig(&opts.CleanupConfig); err != nil {
-		return fmt.Errorf("cleanup config validation failed: %v", err)
+	// 清理配置验证
+	if opts.CleanupConfig.Enable {
+		if err := validateCleanupConfig(&opts.CleanupConfig); err != nil {
+			return fmt.Errorf("cleanup config validation failed: %v", err)
+		}
 	}
 
-	// 验证异步配置
-	if err := validateAsyncConfig(&opts.AsyncConfig); err != nil {
-		return fmt.Errorf("async config validation failed: %v", err)
+	// 异步配置验证
+	if opts.AsyncConfig.Enable {
+		if err := validateAsyncConfig(&opts.AsyncConfig); err != nil {
+			return fmt.Errorf("async config validation failed: %v", err)
+		}
 	}
 
-	// 验证恢复配置
-	if err := validateRecoveryConfig(&opts.RecoveryConfig); err != nil {
-		return fmt.Errorf("recovery config validation failed: %v", err)
+	// 恢复配置验证
+	if opts.RecoveryConfig.Enable {
+		if err := validateRecoveryConfig(&opts.RecoveryConfig); err != nil {
+			return fmt.Errorf("recovery config validation failed: %v", err)
+		}
 	}
 
-	// 验证配置冲突
+	// 配置冲突检查
 	if err := validateConfigConflicts(opts); err != nil {
-		return fmt.Errorf("config conflicts found: %v", err)
+		return fmt.Errorf("config conflicts validation failed: %v", err)
 	}
 
 	return nil
 }
 
-// validateBasicOptions 验证基础配置
+// validateBasicOptions 验证基本选项
 func validateBasicOptions(opts *Options) error {
 	// 验证日志级别
-	if !isValidLogLevel(opts.Level) {
-		return fmt.Errorf("invalid log level: %v", opts.Level)
+	if !ValidateLevel(opts.Level.String()) {
+		return fmt.Errorf("invalid log level: %s", opts.Level)
 	}
 
 	// 验证输出路径
 	if len(opts.OutputPaths) == 0 {
-		return fmt.Errorf("output paths cannot be empty")
+		return errors.New("output paths cannot be empty")
 	}
 
-	// 验证文件大小限制
-	if opts.MaxSize <= 0 {
-		return fmt.Errorf("max size must be positive")
+	// 验证队列配置 - 只在必要时验证
+	if opts.QueueConfig != (QueueConfig{}) { // 只有当 QueueConfig 被设置时才验证
+		if opts.QueueConfig.MaxSize <= 0 {
+			return errors.New("max size must be positive")
+		}
+		if opts.QueueConfig.BatchSize <= 0 {
+			return errors.New("batch size must be positive")
+		}
+		if opts.QueueConfig.Workers <= 0 {
+			return errors.New("workers count must be positive")
+		}
+		if opts.QueueConfig.FlushInterval <= 0 {
+			return errors.New("flush interval must be positive")
+		}
 	}
 
 	return nil
@@ -68,120 +82,79 @@ func validateBasicOptions(opts *Options) error {
 
 // validateCompressConfig 验证压缩配置
 func validateCompressConfig(config *CompressConfig) error {
-	if !config.Enable {
-		return nil
+	if !isValidCompressAlgorithm(config.Algorithm) {
+		return fmt.Errorf("invalid compress algorithm: %s", config.Algorithm)
 	}
-
-	// 验证压缩算法
-	if config.Algorithm != "" && config.Algorithm != "gzip" {
-		return fmt.Errorf("unsupported compression algorithm: %s", config.Algorithm)
+	if config.Level < 0 || config.Level > 9 {
+		return fmt.Errorf("invalid compress level: %d", config.Level)
 	}
-
-	// 验证压缩级别
-	if config.Level < gzip.NoCompression || config.Level > gzip.BestCompression {
-		return fmt.Errorf("invalid compression level: %d", config.Level)
-	}
-
-	// 验证压缩间隔
-	if config.Interval < time.Second {
-		return fmt.Errorf("compress interval must be at least 1 second")
-	}
-
 	return nil
 }
 
 // validateCleanupConfig 验证清理配置
 func validateCleanupConfig(config *CleanupConfig) error {
-	if !config.Enable {
-		return nil
+	if config.MaxAge < 0 {
+		return fmt.Errorf("max age must be non-negative")
 	}
-
-	// 验证最大备份数
-	if config.MaxBackups <= 0 {
-		return fmt.Errorf("max backups must be positive")
+	if config.MaxBackups < 0 {
+		return fmt.Errorf("max backups must be non-negative")
 	}
-
-	// 验证最大保留天数
-	if config.MaxAge <= 0 {
-		return fmt.Errorf("max age must be positive")
+	if config.Interval <= 0 {
+		return fmt.Errorf("cleanup interval must be positive")
 	}
-
-	// 验证清理间隔
-	if config.Interval < time.Minute {
-		return fmt.Errorf("cleanup interval must be at least 1 minute")
-	}
-
 	return nil
 }
 
 // validateAsyncConfig 验证异步配置
 func validateAsyncConfig(config *AsyncConfig) error {
-	if !config.Enable {
-		return nil
-	}
-
-	// 验证缓冲区大小
 	if config.BufferSize <= 0 {
 		return fmt.Errorf("buffer size must be positive")
 	}
-
-	// 验证刷新间隔
-	if config.FlushInterval < time.Millisecond {
-		return fmt.Errorf("flush interval must be at least 1 millisecond")
+	if config.FlushInterval <= 0 {
+		return fmt.Errorf("flush interval must be positive")
 	}
-
 	return nil
 }
 
 // validateRecoveryConfig 验证恢复配置
 func validateRecoveryConfig(config *RecoveryConfig) error {
-	if !config.Enable {
-		return nil
+	if config.MaxRetries < 0 {
+		return fmt.Errorf("max retries must be non-negative")
 	}
-
-	// 验证最大重试次数
-	if config.MaxRetries <= 0 {
-		return fmt.Errorf("max retries must be positive")
+	if config.RetryInterval <= 0 {
+		return fmt.Errorf("retry interval must be positive")
 	}
-
-	// 验证重试间隔
-	if config.RetryInterval < time.Millisecond {
-		return fmt.Errorf("retry interval must be at least 1 millisecond")
+	if config.MaxStackSize < 0 {
+		return fmt.Errorf("max stack size must be non-negative")
 	}
-
-	// 验证堆栈大小
-	if config.EnableStackTrace && config.MaxStackSize <= 0 {
-		return fmt.Errorf("max stack size must be positive when stack trace is enabled")
-	}
-
 	return nil
 }
 
 // validateConfigConflicts 验证配置冲突
 func validateConfigConflicts(opts *Options) error {
-	// 检查异步写入和错误恢复的冲突
 	if opts.AsyncConfig.Enable && opts.RecoveryConfig.Enable {
-		if opts.AsyncConfig.BlockOnFull && opts.RecoveryConfig.MaxRetries > 0 {
-			return fmt.Errorf("blocking async write conflicts with retry mechanism")
-		}
+		return fmt.Errorf("async and recovery configs cannot be enabled simultaneously")
 	}
-
-	// 检查压缩和清理的冲突
-	if opts.CompressConfig.Enable && opts.CleanupConfig.Enable {
-		if opts.CompressConfig.DeleteSource && opts.CleanupConfig.MaxBackups > 0 {
-			return fmt.Errorf("compress delete source conflicts with cleanup max backups")
-		}
-	}
-
 	return nil
 }
 
-// isValidLogLevel 验证日志级别是否有效
-func isValidLogLevel(level types.Level) bool {
-	switch level {
-	case types.DebugLevel, types.InfoLevel, types.WarnLevel, types.ErrorLevel, types.FatalLevel:
-		return true
-	default:
-		return false
+// ValidateLevel 验证日志级别
+func ValidateLevel(level string) bool {
+	validLevels := map[string]bool{
+		"debug": true,
+		"info":  true,
+		"warn":  true,
+		"error": true,
+		"fatal": true,
 	}
+	return validLevels[strings.ToLower(level)]
+}
+
+// isValidCompressAlgorithm 验证压缩算法
+func isValidCompressAlgorithm(algorithm string) bool {
+	validAlgorithms := map[string]bool{
+		"gzip": true,
+		"zlib": true,
+	}
+	return validAlgorithms[strings.ToLower(algorithm)]
 }
