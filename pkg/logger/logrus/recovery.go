@@ -2,8 +2,9 @@ package logrus
 
 import (
 	"fmt"
-	"runtime"
-	"sync"
+	"io"
+	"runtime/debug"
+	"strings"
 	"time"
 )
 
@@ -19,118 +20,87 @@ type RecoveryConfig struct {
 
 // RecoveryWriter 错误恢复写入器
 type RecoveryWriter struct {
-	config   RecoveryConfig         // 配置
-	writer   Writer                 // 写入器
-	mu       sync.Mutex             // 互斥锁
-	retryMap map[string]*retryState // 记录每个日志的重试状态
-}
-
-type retryState struct {
-	retries   int       // 重试次数
-	lastRetry time.Time // 最后一次重试时间
-	content   []byte    // 日志内容
+	writer    io.Writer      // 写入器
+	config    RecoveryConfig // 配置
+	retryDone chan struct{}  // 用于通知重试完成
 }
 
 // NewRecoveryWriter 创建错误恢复写入器
-func NewRecoveryWriter(w Writer, config RecoveryConfig) *RecoveryWriter {
-	// 验证配置
-	if config.PanicHandler == nil {
-		config.PanicHandler = defaultPanicHandler
-	}
-	// 创建错误恢复写入器
+func NewRecoveryWriter(writer io.Writer, config RecoveryConfig) *RecoveryWriter {
 	return &RecoveryWriter{
-		config:   config,                       // 配置
-		writer:   w,                            // 写入器
-		retryMap: make(map[string]*retryState), // 重试状态映射
+		writer:    writer,              // 写入器
+		config:    config,              // 配置
+		retryDone: make(chan struct{}), // 用于通知重试完成
 	}
 }
 
 // Write 实现 io.Writer 接口
 func (w *RecoveryWriter) Write(p []byte) (n int, err error) {
-	// 检查是否启用错误恢复
-	if !w.config.Enable {
-		return w.writer.Write(p)
+	if !w.config.Enable { // 如果未启用错误恢复，则直接写入
+		return w.writer.Write(p) // 直接写入
 	}
 
-	// 使用 defer 恢复 panic
-	defer func() {
-		// 恢复 panic
-		if r := recover(); r != nil {
-			stack := make([]byte, w.config.MaxStackSize)    // 创建堆栈
-			stack = stack[:runtime.Stack(stack, false)]     // 获取堆栈
-			w.config.PanicHandler(r, stack)                 // 调用 panic 处理函数
-			err = fmt.Errorf("recovered from panic: %v", r) // 设置错误
-		}
+	// 复制数据以防后续修改
+	data := make([]byte, len(p))
+	copy(data, p) // 复制数据
+
+	// 包装首次写入，处理可能的 panic
+	var firstWriteErr error
+	func() {
+		defer func() {
+			if r := recover(); r != nil { // 捕获 panic
+				if w.config.PanicHandler != nil {
+					w.config.PanicHandler(r, debug.Stack()) // 调用 panic 处理函数
+				}
+				firstWriteErr = fmt.Errorf("panic in write: %v", r) // 设置错误
+			}
+		}()
+		n, firstWriteErr = w.writer.Write(data) // 写入数据
 	}()
 
-	// 尝试写入
-	n, err = w.writer.Write(p)
-
-	// 如果写入失败，处理错误
-	if err != nil {
-		return w.handleWriteError(p)
+	// 如果首次写入成功，直接返回
+	if firstWriteErr == nil {
+		return n, nil
 	}
 
-	return n, nil
-}
-
-// handleWriteError 处理写入错误
-func (w *RecoveryWriter) handleWriteError(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	key := string(p)                 // 使用日志内容作为key
-	state, exists := w.retryMap[key] // 获取重试状态
-
-	// 如果重试状态不存在，创建新的重试状态
-	if !exists {
-		state = &retryState{content: p} // 创建新的重试状态
-		w.retryMap[key] = state
+	// 如果是 panic 导致的错误，直接返回错误
+	if strings.Contains(firstWriteErr.Error(), "panic in write") {
+		return 0, firstWriteErr
 	}
 
-	// 检查是否超过最大重试次数
-	if state.retries >= w.config.MaxRetries {
-		delete(w.retryMap, key)
-		return 0, fmt.Errorf("max retries exceeded")
-	}
-
-	// 检查重试间隔
-	if time.Since(state.lastRetry) < w.config.RetryInterval {
-		return 0, fmt.Errorf("retry too frequent")
-	}
-
-	// 增加重试次数并更新时间
-	state.retries++
-	state.lastRetry = time.Now()
-
-	// 异步重试
+	// 启动重试协程
 	go func() {
-		time.Sleep(w.config.RetryInterval)
-		if _, err := w.writer.Write(p); err == nil {
-			w.mu.Lock()
-			delete(w.retryMap, key)
-			w.mu.Unlock()
+		defer func() {
+			if r := recover(); r != nil { // 捕获 panic
+				if w.config.PanicHandler != nil {
+					w.config.PanicHandler(r, debug.Stack()) // 调用 panic 处理函数
+				}
+			}
+			// 无论成功失败，都通知重试完成
+			close(w.retryDone) // 通知重试完成
+		}()
+
+		for i := 0; i < w.config.MaxRetries; i++ {
+			time.Sleep(w.config.RetryInterval)
+			if _, err := w.writer.Write(data); err == nil { // 写入数据
+				return // 如果写入成功，返回
+			}
 		}
 	}()
 
+	// 返回成功，因为重试是异步的
 	return len(p), nil
 }
 
-// defaultPanicHandler 默认panic处理函数
-func defaultPanicHandler(r interface{}, stack []byte) {
-	fmt.Printf("Recovered from panic: %v\nStack trace:\n%s\n", r, stack)
+// WaitForRetries 等待所有重试完成
+func (w *RecoveryWriter) WaitForRetries() {
+	if w.retryDone != nil {
+		<-w.retryDone                     // 等待重试完成
+		w.retryDone = make(chan struct{}) // 重置 channel 以供下次使用
+	}
 }
 
-// CleanupRetries 清理过期的重试记录
 func (w *RecoveryWriter) CleanupRetries() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	// 遍历重试记录
-	for key, state := range w.retryMap {
-		// 检查是否超过重试间隔
-		if time.Since(state.lastRetry) > w.config.RetryInterval*time.Duration(w.config.MaxRetries) {
-			delete(w.retryMap, key)
-		}
-	}
+	// 等待所有重试完成
+	w.WaitForRetries()
 }

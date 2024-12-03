@@ -11,10 +11,13 @@ import (
 
 // MockWriter 用于测试的模拟写入器
 type MockWriter struct {
-	mu      sync.Mutex
-	written []byte
-	delay   time.Duration // 模拟写入延迟
-	err     error         // 模拟写入错误
+	mu          sync.Mutex
+	written     []byte
+	delay       time.Duration // 模拟写入延迟
+	err         error         // 模拟写入错误
+	failNow     bool          // 是否立即失败
+	shouldPanic bool          // 是否触发 panic
+	writeCount  int           // 写入次数
 }
 
 func NewMockWriter() *MockWriter {
@@ -22,15 +25,24 @@ func NewMockWriter() *MockWriter {
 }
 
 func (w *MockWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.writeCount++
+
+	if w.shouldPanic {
+		panic("模拟的 panic 情况")
+	}
+
+	if w.failNow {
+		return 0, w.err
+	}
+
 	if w.delay > 0 {
 		time.Sleep(w.delay)
 	}
-	if w.err != nil {
-		return 0, w.err
-	}
-	w.mu.Lock()
+
 	w.written = append(w.written, p...)
-	w.mu.Unlock()
 	return len(p), nil
 }
 
