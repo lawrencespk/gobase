@@ -104,22 +104,18 @@ func (q *WriteQueue) Write(p []byte) (n int, err error) {
 // worker 工作协程
 func (q *WriteQueue) worker() {
 	defer q.wg.Done()
-	// 创建缓冲区
+
 	buffer := make([]byte, 0, q.config.BatchSize*2)
-	// 创建刷新间隔
 	ticker := time.NewTicker(q.config.FlushInterval)
-	// 停止刷新间隔
 	defer ticker.Stop()
 
 	flush := func() bool {
 		if len(buffer) > 0 {
-			// 根据测试场景调整处理行为
-			if q.config.MaxSize == 1 && q.config.BatchSize == 1 {
-				// 队列满测试场景
-				time.Sleep(time.Millisecond * 100)
-			}
-			// 带重试的写入
-			if !q.writeWithRetry(buffer) {
+			// 创建数据副本进行写入
+			data := make([]byte, len(buffer))
+			copy(data, buffer)
+
+			if !q.writeWithRetry(data) {
 				return false
 			}
 			buffer = buffer[:0]
@@ -129,19 +125,20 @@ func (q *WriteQueue) worker() {
 
 	for {
 		select {
-		// 结束信号
 		case <-q.done:
 			flush()
 			return
-		// 数据写入
-		case data := <-q.queue:
+		case data, ok := <-q.queue:
+			if !ok {
+				flush()
+				return
+			}
 			buffer = append(buffer, data...)
 			if len(buffer) >= q.config.BatchSize {
 				if !flush() {
 					return
 				}
 			}
-		// 刷新间隔
 		case <-ticker.C:
 			if !flush() {
 				return
@@ -152,26 +149,28 @@ func (q *WriteQueue) worker() {
 
 // writeWithRetry 带重试的写入操作
 func (q *WriteQueue) writeWithRetry(data []byte) bool {
-	// 创建数据副本
-	backup := make([]byte, len(data))
-	copy(backup, data)
+	retries := q.config.RetryCount
+	if retries <= 0 {
+		retries = 3 // 默认重试次数
+	}
 
-	// 重试写入
-	for i := 0; i < 3; i++ {
-		// 写入数据
-		if _, err := q.writer.Write(backup); err == nil {
+	interval := q.config.RetryInterval
+	if interval <= 0 {
+		interval = time.Millisecond * 100 // 默认重试间隔
+	}
+
+	for i := 0; i < retries; i++ {
+		if _, err := q.writer.Write(data); err == nil {
 			return true
 		} else if q.errorHandler != nil {
 			q.errorHandler(err)
 		}
 
-		// 检查队列是否正在运行
 		if atomic.LoadInt32(&q.running) == 0 {
 			return false
 		}
 
-		// 等待一段时间后重试
-		time.Sleep(time.Millisecond * 100 * time.Duration(i+1))
+		time.Sleep(interval * time.Duration(i+1))
 	}
 	return false
 }
@@ -182,19 +181,19 @@ func (q *WriteQueue) Close(ctx context.Context) error {
 		return nil
 	}
 
-	// 等待所有数据处理完成
+	close(q.queue)
+
 	done := make(chan struct{})
 	go func() {
-		close(q.done)
 		q.wg.Wait()
 		close(done)
 	}()
 
-	// 等待完成或上下文完成
 	select {
 	case <-done:
 		return nil
 	case <-ctx.Done():
+		close(q.done)
 		return ctx.Err()
 	}
 }
