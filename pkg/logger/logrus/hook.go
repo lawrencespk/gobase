@@ -16,8 +16,8 @@ type elasticHook struct {
 // newElasticHook 创建Elasticsearch钩子
 func newElasticHook(opts *Options) (logrus.Hook, error) {
 	client, err := elk.NewElkClient(
-		opts.ElasticURLs,
-		opts.ElasticIndex,
+		opts.ElasticURLs,  // Elasticsearch URL
+		opts.ElasticIndex, // Elasticsearch 索引
 		&elk.Options{
 			Workers:       2,                // 工作线程数
 			BatchSize:     100,              // 批量大小
@@ -42,16 +42,16 @@ func newElasticHook(opts *Options) (logrus.Hook, error) {
 
 // Levels 返回日志级别
 func (h *elasticHook) Levels() []logrus.Level {
-	return h.levels
+	return h.levels // 返回日志级别
 }
 
 // Fire 处理日志
 func (h *elasticHook) Fire(entry *logrus.Entry) error {
-	data := make(map[string]interface{})
+	data := make(map[string]interface{}) // 创建数据
 
 	// 复制字段
 	for k, v := range entry.Data {
-		data[k] = v
+		data[k] = v // 复制字段
 	}
 
 	// 添加基本信息

@@ -37,7 +37,7 @@ func NewAsyncWriter(w Writer, config AsyncConfig) *AsyncWriter {
 	}
 
 	if config.Enable {
-		aw.start()
+		aw.start() // 启动异步写入
 	}
 
 	return aw
@@ -45,55 +45,55 @@ func NewAsyncWriter(w Writer, config AsyncConfig) *AsyncWriter {
 
 // Write 实现 io.Writer 接口
 func (w *AsyncWriter) Write(p []byte) (n int, err error) {
-	if !w.config.Enable {
-		return w.writer.Write(p)
+	if !w.config.Enable { // 如果未启用异步写入
+		return w.writer.Write(p) // 同步写入
 	}
 
 	// 复制日志内容，避免被修改
-	data := make([]byte, len(p))
-	copy(data, p)
+	data := make([]byte, len(p)) // 创建数据副本
+	copy(data, p)                // 复制数据
 
 	select {
-	case w.buffer <- data:
-		return len(p), nil
+	case w.buffer <- data: // 写入缓冲区
+		return len(p), nil // 返回写入长度
 	default:
 		if w.config.BlockOnFull {
 			// 阻塞写入
-			w.buffer <- data
-			return len(p), nil
+			w.buffer <- data   // 写入缓冲区
+			return len(p), nil // 返回写入长度
 		} else if w.config.DropOnFull {
 			// 丢弃日志
-			atomic.AddInt64(&w.dropCount, 1)
-			return len(p), nil
+			atomic.AddInt64(&w.dropCount, 1) // 增加丢弃计数
+			return len(p), nil               // 返回写入长度
 		}
 		// 同步写入
-		return w.writer.Write(p)
+		return w.writer.Write(p) // 同步写入
 	}
 }
 
 // start 启动异步写入
 func (w *AsyncWriter) start() {
-	w.wg.Add(1)
-	go w.run()
+	w.wg.Add(1) // 增加等待组计数
+	go w.run()  // 启动异步写入循环
 }
 
 // Stop 停止异步写入
 func (w *AsyncWriter) Stop() error {
 	if w.config.FlushOnExit {
 		// 先刷新数据
-		if err := w.Flush(); err != nil {
+		if err := w.Flush(); err != nil { // 刷新数据
 			return err
 		}
 	}
 	// 再关闭通道
-	close(w.done)
-	w.wg.Wait()
+	close(w.done) // 关闭退出通道
+	w.wg.Wait()   // 等待异步写入完成
 	return nil
 }
 
 // Flush 刷新缓冲区
 func (w *AsyncWriter) Flush() error {
-	if !w.config.Enable {
+	if !w.config.Enable { // 如果未启用异步写入
 		return nil
 	}
 
@@ -101,8 +101,8 @@ func (w *AsyncWriter) Flush() error {
 	for {
 		select {
 		case data := <-w.buffer:
-			if _, err := w.writer.Write(data); err != nil {
-				return err
+			if _, err := w.writer.Write(data); err != nil { // 写入数据
+				return err // 返回错误
 			}
 		default:
 			// 缓冲区已空
@@ -113,12 +113,12 @@ func (w *AsyncWriter) Flush() error {
 
 // run 运行异步写入循环
 func (w *AsyncWriter) run() {
-	defer w.wg.Done()
+	defer w.wg.Done() // 减少等待组计数
 
-	ticker := time.NewTicker(w.config.FlushInterval)
+	ticker := time.NewTicker(w.config.FlushInterval) // 创建定时器
 	defer ticker.Stop()
 
-	buffer := make([][]byte, 0, w.config.BufferSize)
+	buffer := make([][]byte, 0, w.config.BufferSize) // 创建缓冲区
 
 	flushBuffer := func() {
 		if len(buffer) == 0 {
@@ -128,33 +128,33 @@ func (w *AsyncWriter) run() {
 		// 合并多条日志一次写入
 		totalSize := 0
 		for _, b := range buffer {
-			totalSize += len(b)
+			totalSize += len(b) // 计算总大小
 		}
 
 		data := make([]byte, 0, totalSize)
 		for _, b := range buffer {
-			data = append(data, b...)
+			data = append(data, b...) // 合并数据
 		}
 
-		if _, err := w.writer.Write(data); err != nil {
-			fmt.Printf("async write error: %v\n", err)
+		if _, err := w.writer.Write(data); err != nil { // 写入数据
+			fmt.Printf("async write error: %v\n", err) // 打印错误
 		}
 
 		// 清空缓冲区
-		buffer = buffer[:0]
+		buffer = buffer[:0] // 清空缓冲区
 	}
 
 	for {
 		select {
-		case <-w.done:
-			flushBuffer()
+		case <-w.done: // 退出通道触发
+			flushBuffer() // 刷新缓冲区
 			return
-		case <-ticker.C:
+		case <-ticker.C: // 定时器触发
 			flushBuffer()
-		case data := <-w.buffer:
-			buffer = append(buffer, data)
-			if len(buffer) >= w.config.BufferSize {
-				flushBuffer()
+		case data := <-w.buffer: // 缓冲区触发
+			buffer = append(buffer, data)           // 添加数据
+			if len(buffer) >= w.config.BufferSize { // 如果缓冲区满
+				flushBuffer() // 刷新缓冲区
 			}
 		}
 	}
@@ -162,5 +162,5 @@ func (w *AsyncWriter) run() {
 
 // GetDropCount 获取丢弃的日志数量
 func (w *AsyncWriter) GetDropCount() int64 {
-	return atomic.LoadInt64(&w.dropCount)
+	return atomic.LoadInt64(&w.dropCount) // 获取丢弃计数
 }

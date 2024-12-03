@@ -24,9 +24,9 @@ func (f *customFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 	// 时间格式
 	if f.TimestampFormat != "" {
-		data["timestamp"] = entry.Time.Format(f.TimestampFormat)
+		data["timestamp"] = entry.Time.Format(f.TimestampFormat) // 使用自定义时间格式
 	} else {
-		data["timestamp"] = entry.Time.Format(time.RFC3339)
+		data["timestamp"] = entry.Time.Format(time.RFC3339) // 使用默认时间格式
 	}
 
 	data["level"] = entry.Level.String() // 日志级别
@@ -44,10 +44,10 @@ func (f *customFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	// 错误字段特殊处理
 	if err, ok := entry.Data["error"]; ok {
 		if customErr, ok := err.(interface{ Code() string }); ok {
-			data["error_code"] = customErr.Code()
+			data["error_code"] = customErr.Code() // 错误代码
 		}
 		if customErr, ok := err.(interface{ Stack() []string }); ok {
-			data["error_stack"] = customErr.Stack()
+			data["error_stack"] = customErr.Stack() // 错误堆栈
 		}
 	}
 
@@ -55,17 +55,17 @@ func (f *customFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	for k, v := range entry.Data {
 		if k == "error" {
 			if err, ok := v.(error); ok {
-				data[k] = err.Error()
+				data[k] = err.Error() // 错误信息
 			} else {
-				data[k] = v
+				data[k] = v // 其他数据
 			}
 			continue
 		}
-		data[k] = v
+		data[k] = v // 其他数据
 	}
 
 	if f.PrettyPrint {
-		return json.MarshalIndent(data, "", "    ")
+		return json.MarshalIndent(data, "", "    ") // 美化打印
 	}
-	return json.Marshal(data)
+	return json.Marshal(data) // 普通打印
 }

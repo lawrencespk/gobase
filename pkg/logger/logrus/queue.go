@@ -55,6 +55,7 @@ func validateConfig(config QueueConfig) error {
 
 // NewWriteQueue 创建新的写入队列
 func NewWriteQueue(writer Writer, config QueueConfig) (*WriteQueue, error) {
+	// 验证配置
 	if err := validateConfig(config); err != nil {
 		return nil, err
 	}
@@ -79,6 +80,7 @@ func NewWriteQueue(writer Writer, config QueueConfig) (*WriteQueue, error) {
 
 // Write 写入数据
 func (q *WriteQueue) Write(p []byte) (n int, err error) {
+	// 检查队列是否正在运行
 	if atomic.LoadInt32(&q.running) == 0 {
 		return 0, errors.New("queue not running")
 	}
@@ -89,8 +91,10 @@ func (q *WriteQueue) Write(p []byte) (n int, err error) {
 
 	// 使用带超时的 select 来平衡响应速度和队列满的检测
 	select {
+	// 数据写入
 	case q.queue <- data:
 		return len(p), nil
+	// 极短的超时，用于快速检测队列是否已满
 	case <-time.After(time.Microsecond):
 		// 极短的超时，用于快速检测队列是否已满
 		return 0, errQueueFull
@@ -100,9 +104,11 @@ func (q *WriteQueue) Write(p []byte) (n int, err error) {
 // worker 工作协程
 func (q *WriteQueue) worker() {
 	defer q.wg.Done()
-
+	// 创建缓冲区
 	buffer := make([]byte, 0, q.config.BatchSize*2)
+	// 创建刷新间隔
 	ticker := time.NewTicker(q.config.FlushInterval)
+	// 停止刷新间隔
 	defer ticker.Stop()
 
 	flush := func() bool {
@@ -112,6 +118,7 @@ func (q *WriteQueue) worker() {
 				// 队列满测试场景
 				time.Sleep(time.Millisecond * 100)
 			}
+			// 带重试的写入
 			if !q.writeWithRetry(buffer) {
 				return false
 			}
@@ -122,9 +129,11 @@ func (q *WriteQueue) worker() {
 
 	for {
 		select {
+		// 结束信号
 		case <-q.done:
 			flush()
 			return
+		// 数据写入
 		case data := <-q.queue:
 			buffer = append(buffer, data...)
 			if len(buffer) >= q.config.BatchSize {
@@ -132,6 +141,7 @@ func (q *WriteQueue) worker() {
 					return
 				}
 			}
+		// 刷新间隔
 		case <-ticker.C:
 			if !flush() {
 				return
@@ -146,17 +156,21 @@ func (q *WriteQueue) writeWithRetry(data []byte) bool {
 	backup := make([]byte, len(data))
 	copy(backup, data)
 
+	// 重试写入
 	for i := 0; i < 3; i++ {
+		// 写入数据
 		if _, err := q.writer.Write(backup); err == nil {
 			return true
 		} else if q.errorHandler != nil {
 			q.errorHandler(err)
 		}
 
+		// 检查队列是否正在运行
 		if atomic.LoadInt32(&q.running) == 0 {
 			return false
 		}
 
+		// 等待一段时间后重试
 		time.Sleep(time.Millisecond * 100 * time.Duration(i+1))
 	}
 	return false
@@ -176,6 +190,7 @@ func (q *WriteQueue) Close(ctx context.Context) error {
 		close(done)
 	}()
 
+	// 等待完成或上下文完成
 	select {
 	case <-done:
 		return nil

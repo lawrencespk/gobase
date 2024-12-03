@@ -33,9 +33,11 @@ type retryState struct {
 
 // NewRecoveryWriter 创建错误恢复写入器
 func NewRecoveryWriter(w Writer, config RecoveryConfig) *RecoveryWriter {
+	// 验证配置
 	if config.PanicHandler == nil {
 		config.PanicHandler = defaultPanicHandler
 	}
+	// 创建错误恢复写入器
 	return &RecoveryWriter{
 		config:   config,                       // 配置
 		writer:   w,                            // 写入器
@@ -45,22 +47,26 @@ func NewRecoveryWriter(w Writer, config RecoveryConfig) *RecoveryWriter {
 
 // Write 实现 io.Writer 接口
 func (w *RecoveryWriter) Write(p []byte) (n int, err error) {
+	// 检查是否启用错误恢复
 	if !w.config.Enable {
 		return w.writer.Write(p)
 	}
 
 	// 使用 defer 恢复 panic
 	defer func() {
+		// 恢复 panic
 		if r := recover(); r != nil {
-			stack := make([]byte, w.config.MaxStackSize)
-			stack = stack[:runtime.Stack(stack, false)]
-			w.config.PanicHandler(r, stack)
-			err = fmt.Errorf("recovered from panic: %v", r)
+			stack := make([]byte, w.config.MaxStackSize)    // 创建堆栈
+			stack = stack[:runtime.Stack(stack, false)]     // 获取堆栈
+			w.config.PanicHandler(r, stack)                 // 调用 panic 处理函数
+			err = fmt.Errorf("recovered from panic: %v", r) // 设置错误
 		}
 	}()
 
 	// 尝试写入
 	n, err = w.writer.Write(p)
+
+	// 如果写入失败，处理错误
 	if err != nil {
 		return w.handleWriteError(p)
 	}
@@ -73,10 +79,12 @@ func (w *RecoveryWriter) handleWriteError(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	key := string(p) // 使用日志内容作为key
-	state, exists := w.retryMap[key]
+	key := string(p)                 // 使用日志内容作为key
+	state, exists := w.retryMap[key] // 获取重试状态
+
+	// 如果重试状态不存在，创建新的重试状态
 	if !exists {
-		state = &retryState{content: p}
+		state = &retryState{content: p} // 创建新的重试状态
 		w.retryMap[key] = state
 	}
 
@@ -118,7 +126,9 @@ func (w *RecoveryWriter) CleanupRetries() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// 遍历重试记录
 	for key, state := range w.retryMap {
+		// 检查是否超过重试间隔
 		if time.Since(state.lastRetry) > w.config.RetryInterval*time.Duration(w.config.MaxRetries) {
 			delete(w.retryMap, key)
 		}

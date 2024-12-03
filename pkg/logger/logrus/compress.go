@@ -21,69 +21,69 @@ type CompressConfig struct {
 
 // LogCompressor 日志压缩器
 type LogCompressor struct {
-	config CompressConfig
-	done   chan struct{}
+	config CompressConfig // 压缩配置
+	done   chan struct{}  // 结束通道
 }
 
 // NewLogCompressor 创建日志压缩器
 func NewLogCompressor(config CompressConfig) *LogCompressor {
 	return &LogCompressor{
-		config: config,
-		done:   make(chan struct{}),
+		config: config,              // 压缩配置
+		done:   make(chan struct{}), // 结束通道
 	}
 }
 
 // Start 启动压缩服务
 func (c *LogCompressor) Start() {
-	if !c.config.Enable {
+	if !c.config.Enable { // 如果未启用压缩
 		return
 	}
 
-	go c.run()
+	go c.run() // 运行压缩服务
 }
 
 // Stop 停止压缩服务
 func (c *LogCompressor) Stop() {
-	close(c.done)
+	close(c.done) // 关闭结束通道
 }
 
 // run 运行压缩服务
 func (c *LogCompressor) run() {
-	ticker := time.NewTicker(c.config.Interval)
-	defer ticker.Stop()
+	ticker := time.NewTicker(c.config.Interval) // 创建定时器
+	defer ticker.Stop()                         // 停止定时器
 
 	for {
 		select {
-		case <-ticker.C:
-			c.compressOldLogs()
-		case <-c.done:
-			return
+		case <-ticker.C: // 定时器触发
+			c.compressOldLogs() // 压缩旧日志文件
+		case <-c.done: // 结束通道触发
+			return // 退出
 		}
 	}
 }
 
 // compressOldLogs 压缩旧日志文件
 func (c *LogCompressor) compressOldLogs() {
-	for _, path := range defaultOptions.OutputPaths {
-		if path == "stdout" || path == "stderr" {
+	for _, path := range defaultOptions.OutputPaths { // 遍历输出路径
+		if path == "stdout" || path == "stderr" { // 跳过标准输出和标准错误
 			continue
 		}
 
-		dir := filepath.Dir(path)
-		pattern := filepath.Join(dir, "*.log")
+		dir := filepath.Dir(path)              // 获取目录
+		pattern := filepath.Join(dir, "*.log") // 获取日志文件模式
 
-		files, err := filepath.Glob(pattern)
+		files, err := filepath.Glob(pattern) // 获取所有匹配的文件
 		if err != nil {
-			continue
+			continue // 如果获取失败，跳过
 		}
 
 		for _, file := range files {
-			if strings.HasSuffix(file, ".gz") {
+			if strings.HasSuffix(file, ".gz") { // 如果文件已压缩，跳过
 				continue
 			}
 
-			if err := c.compressFile(file); err != nil {
-				fmt.Printf("compress file error: %v\n", err)
+			if err := c.compressFile(file); err != nil { // 压缩文件
+				fmt.Printf("compress file error: %v\n", err) // 打印错误
 			}
 		}
 	}
@@ -92,39 +92,39 @@ func (c *LogCompressor) compressOldLogs() {
 // compressFile 压缩单个文件
 func (c *LogCompressor) compressFile(filename string) error {
 	// 打开源文件
-	source, err := os.Open(filename)
+	source, err := os.Open(filename) // 打开源文件
 	if err != nil {
-		return fmt.Errorf("open source file error: %v", err)
+		return fmt.Errorf("open source file error: %v", err) // 打印错误
 	}
 	defer source.Close()
 
 	// 创建目标文件
-	target, err := os.Create(filename + ".gz")
+	target, err := os.Create(filename + ".gz") // 创建目标文件
 	if err != nil {
-		return fmt.Errorf("create target file error: %v", err)
+		return fmt.Errorf("create target file error: %v", err) // 打印错误
 	}
-	defer target.Close()
+	defer target.Close() // 关闭目标文件
 
 	// 创建gzip写入器
-	gw, err := gzip.NewWriterLevel(target, c.config.Level)
+	gw, err := gzip.NewWriterLevel(target, c.config.Level) // 创建gzip写入器
 	if err != nil {
-		return fmt.Errorf("create gzip writer error: %v", err)
+		return fmt.Errorf("create gzip writer error: %v", err) // 打印错误
 	}
 	defer gw.Close()
 
 	// 写入文件头信息
-	gw.Header.Name = filepath.Base(filename)
-	gw.Header.ModTime = time.Now()
+	gw.Header.Name = filepath.Base(filename) // 设置文件名
+	gw.Header.ModTime = time.Now()           // 设置修改时间
 
 	// 复制文件内容
-	if _, err := io.Copy(gw, source); err != nil {
-		return fmt.Errorf("copy file content error: %v", err)
+	if _, err := io.Copy(gw, source); err != nil { // 复制文件内容
+		return fmt.Errorf("copy file content error: %v", err) // 打印错误
 	}
 
 	// 如果配置了删除源文件
 	if c.config.DeleteSource {
-		if err := os.Remove(filename); err != nil {
-			return fmt.Errorf("remove source file error: %v", err)
+		if err := os.Remove(filename); err != nil { // 删除源文件
+			return fmt.Errorf("remove source file error: %v", err) // 打印错误
 		}
 	}
 

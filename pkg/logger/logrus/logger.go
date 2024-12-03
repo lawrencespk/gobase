@@ -264,23 +264,31 @@ func (l *logrusLogger) GetLevel() types.Level {
 func (l *logrusLogger) Sync() error {
 	var errs []error
 
+	// 停止压缩器
 	if l.compressor != nil {
 		l.compressor.Stop()
 	}
+
+	// 停止清理器
 	if l.cleaner != nil {
 		l.cleaner.Stop()
 	}
+
+	// 停止异步写入器
 	if l.asyncWriter != nil {
 		if err := l.asyncWriter.Stop(); err != nil {
 			errs = append(errs, err)
 		}
 	}
+
+	// 关闭文件管理器
 	if l.fileManager != nil {
 		if err := l.fileManager.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
 
+	// 关闭写入队列
 	if l.writeQueue != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -289,6 +297,7 @@ func (l *logrusLogger) Sync() error {
 		}
 	}
 
+	// 如果有错误，返回错误信息
 	if len(errs) > 0 {
 		return fmt.Errorf("sync errors: %v", errs)
 	}
@@ -379,7 +388,7 @@ func convertLevel(level types.Level) logrus.Level {
 		return logrus.DebugLevel
 	case types.InfoLevel: // 信息级别
 		return logrus.InfoLevel
-	case types.WarnLevel:
+	case types.WarnLevel: // 警告级别
 		return logrus.WarnLevel
 	case types.ErrorLevel: // 错误级别
 		return logrus.ErrorLevel

@@ -136,56 +136,56 @@ func WithErrorOutputPaths(errorOutputs []string) Option {
 // WithCompressConfig 设置压缩配置
 func WithCompressConfig(config CompressConfig) Option {
 	return func(o *Options) {
-		o.CompressConfig = config
+		o.CompressConfig = config // 设置压缩配置
 	}
 }
 
 // WithCleanupConfig 设置清理配置
 func WithCleanupConfig(config CleanupConfig) Option {
 	return func(o *Options) {
-		o.CleanupConfig = config
+		o.CleanupConfig = config // 设置清理配置
 	}
 }
 
 // WithAsyncConfig 设置异步配置
 func WithAsyncConfig(config AsyncConfig) Option {
 	return func(o *Options) {
-		o.AsyncConfig = config
+		o.AsyncConfig = config // 设置异步配置
 	}
 }
 
 // WithRecoveryConfig 设置恢复配置
 func WithRecoveryConfig(config RecoveryConfig) Option {
 	return func(o *Options) {
-		o.RecoveryConfig = config
+		o.RecoveryConfig = config // 设置恢复配置
 	}
 }
 
 // WithAsync 设置异步配置
 func WithAsync(config AsyncConfig) Option {
 	return func(o *Options) {
-		o.AsyncConfig = config
+		o.AsyncConfig = config // 设置异步配置
 	}
 }
 
 // WithCompress 设置压缩配置
 func WithCompress(config CompressConfig) Option {
 	return func(o *Options) {
-		o.CompressConfig = config
+		o.CompressConfig = config // 设置压缩配置
 	}
 }
 
 // WithCleanup 设置清理配置
 func WithCleanup(config CleanupConfig) Option {
 	return func(o *Options) {
-		o.CleanupConfig = config
+		o.CleanupConfig = config // 设置清理配置
 	}
 }
 
 // WithRecovery 设置恢复配置
 func WithRecovery(config RecoveryConfig) Option {
 	return func(o *Options) {
-		o.RecoveryConfig = config
+		o.RecoveryConfig = config // 设置恢复配置
 	}
 }
 

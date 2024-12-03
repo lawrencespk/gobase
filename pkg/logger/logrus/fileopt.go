@@ -38,10 +38,10 @@ func NewFileManager(opts FileOptions) *FileManager {
 		opts.BufferSize = 32 * 1024 // 32KB default
 	}
 	if opts.FlushInterval <= 0 {
-		opts.FlushInterval = time.Second
+		opts.FlushInterval = time.Second // 默认刷新间隔为1秒
 	}
 	if opts.MaxOpenFiles <= 0 {
-		opts.MaxOpenFiles = 100
+		opts.MaxOpenFiles = 100 // 默认最大打开文件数为100
 	}
 
 	fm := &FileManager{
@@ -51,8 +51,8 @@ func NewFileManager(opts FileOptions) *FileManager {
 		writes: NewWritePool(opts.BufferSize), // 写入器池
 	}
 
-	go fm.flushLoop()
-	go fm.cleanupLoop()
+	go fm.flushLoop()   // 启动刷新循环
+	go fm.cleanupLoop() // 启动清理循环
 
 	return fm
 }
@@ -74,8 +74,8 @@ func (fm *FileManager) WriteToFile(filename string, p []byte) (n int, err error)
 		return 0, err
 	}
 
-	handle.mu.Lock()
-	defer handle.mu.Unlock()
+	handle.mu.Lock()         // 锁定
+	defer handle.mu.Unlock() // 解锁
 
 	// 写入缓冲区
 	n, err = handle.buffer.Write(p)
@@ -111,12 +111,12 @@ func (fm *FileManager) flushHandle(handle *FileHandle) error {
 
 // getHandle 获取文件句柄
 func (fm *FileManager) getHandle(filename string) (*FileHandle, error) {
-	fm.mu.RLock()
-	handle, ok := fm.files[filename]
-	fm.mu.RUnlock()
+	fm.mu.RLock()                    // 锁定
+	handle, ok := fm.files[filename] // 获取文件句柄
+	fm.mu.RUnlock()                  // 解锁
 
 	if ok {
-		return handle, nil
+		return handle, nil // 如果文件句柄存在，返回文件句柄
 	}
 
 	fm.mu.Lock()
@@ -129,7 +129,7 @@ func (fm *FileManager) getHandle(filename string) (*FileHandle, error) {
 
 	// 检查是否超过最大打开文件数
 	if len(fm.files) >= fm.opts.MaxOpenFiles {
-		fm.closeIdleFiles()
+		fm.closeIdleFiles() // 关闭空闲文件
 	}
 
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
@@ -142,7 +142,7 @@ func (fm *FileManager) getHandle(filename string) (*FileHandle, error) {
 		buffer:  fm.pool.Get(), // 缓冲区
 		lastUse: time.Now(),    // 最后一次使用时间
 	}
-	fm.files[filename] = handle
+	fm.files[filename] = handle // 添加文件句柄
 
 	return handle, nil
 }
@@ -150,10 +150,10 @@ func (fm *FileManager) getHandle(filename string) (*FileHandle, error) {
 // flushLoop 定期刷新缓冲区
 func (fm *FileManager) flushLoop() {
 	ticker := time.NewTicker(fm.opts.FlushInterval)
-	defer ticker.Stop()
+	defer ticker.Stop() // 停止定时器
 
 	for range ticker.C {
-		fm.flushAll()
+		fm.flushAll() // 刷新所有文件
 	}
 }
 
@@ -163,9 +163,9 @@ func (fm *FileManager) flushAll() {
 	defer fm.mu.RUnlock()
 
 	for _, handle := range fm.files {
-		handle.mu.Lock()
-		fm.flushHandle(handle)
-		handle.mu.Unlock()
+		handle.mu.Lock()       // 锁定
+		fm.flushHandle(handle) // 刷新文件
+		handle.mu.Unlock()     // 解锁
 	}
 }
 
@@ -174,25 +174,25 @@ func (fm *FileManager) closeIdleFiles() {
 	now := time.Now()
 	for filename, handle := range fm.files {
 		if now.Sub(handle.lastUse) > time.Minute {
-			handle.mu.Lock()
-			handle.buffer.WriteTo(handle.file)
-			handle.file.Close()
-			fm.pool.Put(handle.buffer)
-			handle.mu.Unlock()
-			delete(fm.files, filename)
+			handle.mu.Lock()                   // 锁定
+			handle.buffer.WriteTo(handle.file) // 写入文件
+			handle.file.Close()                // 关闭文件
+			fm.pool.Put(handle.buffer)         // 释放缓冲区
+			handle.mu.Unlock()                 // 解锁
+			delete(fm.files, filename)         // 删除文件句柄
 		}
 	}
 }
 
 // cleanupLoop 定期清理空闲文件
 func (fm *FileManager) cleanupLoop() {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
+	ticker := time.NewTicker(time.Minute) // 每分钟清理一次
+	defer ticker.Stop()                   // 停止定时器
 
 	for range ticker.C {
-		fm.mu.Lock()
-		fm.closeIdleFiles()
-		fm.mu.Unlock()
+		fm.mu.Lock()        // 锁定
+		fm.closeIdleFiles() // 关闭空闲文件
+		fm.mu.Unlock()      // 解锁
 	}
 }
 
@@ -202,13 +202,13 @@ func (fm *FileManager) Close() error {
 	defer fm.mu.Unlock()
 
 	for _, handle := range fm.files {
-		handle.mu.Lock()
-		fm.flushHandle(handle)
-		handle.file.Close()
-		fm.pool.Put(handle.buffer)
-		handle.mu.Unlock()
+		handle.mu.Lock()           // 锁定
+		fm.flushHandle(handle)     // 刷新文件
+		handle.file.Close()        // 关闭文件
+		fm.pool.Put(handle.buffer) // 释放缓冲区
+		handle.mu.Unlock()         // 解锁
 	}
 
-	fm.files = nil
+	fm.files = nil // 清空文件句柄映射
 	return nil
 }
