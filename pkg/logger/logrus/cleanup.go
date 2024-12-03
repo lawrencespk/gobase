@@ -14,6 +14,7 @@ type CleanupConfig struct {
 	MaxBackups int           // 保留的旧日志文件个数
 	MaxAge     int           // 日志文件的最大保留天数
 	Interval   time.Duration // 清理检查间隔
+	LogPaths   []string      // 需要清理的日志路径
 }
 
 // LogCleaner 日志清理器
@@ -61,15 +62,13 @@ func (c *LogCleaner) run() {
 
 // cleanupOldLogs 清理旧日志文件
 func (c *LogCleaner) cleanupOldLogs() {
-	for _, path := range defaultOptions.OutputPaths { // 遍历输出路径
+	for _, path := range c.config.LogPaths { // 遍历日志路径
 		if path == "stdout" || path == "stderr" { // 跳过标准输出和标准错误
 			continue
 		}
 
-		dir := filepath.Dir(path)              // 获取目录
-		pattern := filepath.Join(dir, "*.log") // 获取日志文件模式
-
-		files, err := filepath.Glob(pattern) // 获取所有匹配的文件
+		pattern := filepath.Join(path, "*.log") // 获取日志文件模式
+		files, err := filepath.Glob(pattern)    // 获取所有匹配的文件
 		if err != nil {
 			continue
 		}
@@ -81,25 +80,30 @@ func (c *LogCleaner) cleanupOldLogs() {
 			return fi.ModTime().After(fj.ModTime()) // 比较修改时间
 		})
 
-		// 删除多余的备份
-		if len(files) > c.config.MaxBackups {
-			for _, file := range files[c.config.MaxBackups:] {
-				if err := os.Remove(file); err != nil { // 删除文件
-					fmt.Printf("remove old log file error: %v\n", err) // 打印错误
-				}
-			}
-		}
-
-		// 删除过期的日志
+		// 先筛选出未过期的文件
+		validFiles := make([]string, 0)
 		for _, file := range files {
 			fi, err := os.Stat(file) // 获取文件信息
 			if err != nil {          // 如果获取失败，跳过
 				continue
 			}
 
-			if time.Since(fi.ModTime()).Hours() > float64(c.config.MaxAge*24) {
+			// 如果文件未过期，加入有效文件列表
+			if time.Since(fi.ModTime()).Hours() <= float64(c.config.MaxAge*24) {
+				validFiles = append(validFiles, file) // 加入有效文件列表
+			} else {
+				// 删除过期文件
 				if err := os.Remove(file); err != nil { // 删除文件
 					fmt.Printf("remove expired log file error: %v\n", err) // 打印错误
+				}
+			}
+		}
+
+		// 然后基于 MaxBackups 清理未过期的文件
+		if len(validFiles) > c.config.MaxBackups {
+			for _, file := range validFiles[c.config.MaxBackups:] {
+				if err := os.Remove(file); err != nil { // 删除文件
+					fmt.Printf("remove old log file error: %v\n", err) // 打印错误
 				}
 			}
 		}
