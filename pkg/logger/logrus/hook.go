@@ -2,6 +2,7 @@ package logrus
 
 import (
 	"gobase/pkg/logger/elk"
+	"io"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -60,4 +61,35 @@ func (h *elasticHook) Fire(entry *logrus.Entry) error {
 	data["timestamp"] = entry.Time       // 日志时间
 
 	return h.client.Write(data)
+}
+
+// LogHook 通用日志钩子
+type LogHook struct {
+	writer    io.Writer        // 日志输出writer
+	formatter logrus.Formatter // 日志格式化器
+	levels    []logrus.Level   // 支持的日志级别
+}
+
+// NewLogHook 创建新的日志钩子
+func NewLogHook(writer io.Writer, formatter logrus.Formatter, levels ...logrus.Level) logrus.Hook {
+	return &LogHook{
+		writer:    writer,
+		formatter: formatter,
+		levels:    levels,
+	}
+}
+
+// Levels 返回支持的日志级别
+func (h *LogHook) Levels() []logrus.Level {
+	return h.levels
+}
+
+// Fire 处理日志事件
+func (h *LogHook) Fire(entry *logrus.Entry) error {
+	bytes, err := h.formatter.Format(entry)
+	if err != nil {
+		return err
+	}
+	_, err = h.writer.Write(bytes)
+	return err
 }
