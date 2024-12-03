@@ -1,5 +1,9 @@
 package logger
 
+import (
+	"time"
+)
+
 type FieldType uint8
 
 const (
@@ -49,4 +53,31 @@ func Bool(key string, value bool) Field {
 // Error 创建错误字段
 func Error(err error) Field {
 	return Field{Key: "error", Value: err, Type: ErrorType}
+}
+
+// Time 创建时间类型字段
+func Time(key string, value time.Time) Field {
+	return Field{
+		Key:   key,
+		Value: value,
+		Type:  TimeType,
+	}
+}
+
+// Duration 创建持续时间类型字段
+func Duration(key string, value time.Duration) Field {
+	return Field{
+		Key:   key,
+		Value: value,
+		Type:  DurationType,
+	}
+}
+
+// Object 创建对象类型字段
+func Object(key string, value interface{}) Field {
+	return Field{
+		Key:   key,
+		Value: value,
+		Type:  ObjectType,
+	}
 }
