@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"gobase/pkg/logger/types"
@@ -14,16 +17,18 @@ import (
 )
 
 type logrusLogger struct {
-	logger         *logrus.Logger  // logrus日志实例
-	fields         []types.Field   // 字段
-	opts           *Options        // 配置
-	ctx            context.Context // 上下文
-	compressor     *LogCompressor  // 压缩器
-	cleaner        *LogCleaner     // 清理器
-	asyncWriter    *AsyncWriter    // 异步写入器
-	recoveryWriter *RecoveryWriter // 错误恢复写入器
-	fileManager    *FileManager    // 文件管理器
-	writeQueue     *WriteQueue     // 写入队列
+	logger      *logrus.Logger  // logrus日志实例
+	fields      []types.Field   // 字段
+	opts        *Options        // 配置
+	ctx         context.Context // 上下文
+	compressor  *LogCompressor  // 压缩器
+	cleaner     *LogCleaner     // 清理器
+	asyncWriter *AsyncWriter    // 异步写入器
+	fileManager *FileManager    // 文件管理器
+	writeQueue  *WriteQueue     // 写入队列
+	writers     []io.Writer     // 保存writers以便后续清理
+	closed      bool            // 标记是否已关闭
+	mu          sync.Mutex      // 保护 closed 字段
 }
 
 // NewLogger 创建新的logrus日志实例
@@ -35,77 +40,86 @@ func NewLogger(fm *FileManager, config QueueConfig, options *Options) (*logrusLo
 		fileManager: fm,                   // 文件管理器
 	}
 
-	// 初始化写入队列
-	queue, err := NewWriteQueue(fm, config) // 创建写入队列
-	if err != nil {
-		return nil, fmt.Errorf("failed to create write queue: %w", err) // 创建写入队列失败
+	// 设置多输出
+	var writers []io.Writer
+
+	// 处理自定义writers
+	if len(options.writers) > 0 {
+		writers = append(writers, options.writers...)
 	}
-	l.writeQueue = queue // 设置写入队列
 
-	// 配置 logrus
-	l.logger.SetLevel(convertLevel(options.Level)) // 设置日志级别
-	l.logger.SetFormatter(newFormatter(options))   // 设置格式化器
-	l.logger.SetReportCaller(true)                 // 设置调用者
+	// 处理输出路径
+	if len(options.OutputPaths) > 0 {
+		for _, path := range options.OutputPaths {
+			var w io.Writer
+			switch path {
+			case "stdout": // 标准输出
+				w = os.Stdout
+			case "stderr": // 标准错误
+				w = os.Stderr
+			default: // 默认输出到文件
+				// 确保目录存在
+				if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+					return nil, fmt.Errorf("failed to create log directory: %v", err) // 打印创建日志目录失败
+				}
 
-	// 设置输出 - 现在 fileManager 已经可用
-	l.logger.SetOutput(l.getLogOutput()) // 设置输出
-
-	// 添加 hooks
-	if len(options.ElasticURLs) > 0 {
-		hook, err := newElasticHook(options) // 创建ElasticHook
-		if err == nil {
-			l.logger.AddHook(hook) // 添加hook
+				file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+				if err != nil {
+					return nil, fmt.Errorf("failed to open log file %s: %v", path, err) // 打印打开日志文件失败
+				}
+				w = file
+			}
+			writers = append(writers, w)
 		}
 	}
 
+	// 如果没有配置任何输出，默认输出到标准输出
+	if len(writers) == 0 {
+		writers = append(writers, os.Stdout) // 默认输出到标准输出
+	}
+
+	// 设置输出
+	l.logger.SetOutput(io.MultiWriter(writers...))
+	l.writers = writers
+
+	// 初始化写入队列
+	queue, err := NewWriteQueue(fm, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create write queue: %w", err) // 打印创建写入队列失败
+	}
+	l.writeQueue = queue
+
+	// 配置 logrus
+	l.logger.SetLevel(convertLevel(options.Level)) // 设置日志级别
+	l.logger.SetFormatter(newFormatter(options))   // 设置日志格式
+	l.logger.SetReportCaller(true)                 // 设置调用者信息
+
 	// 初始化压缩器
-	l.compressor = NewLogCompressor(options.CompressConfig) // 创建压缩器
-	l.compressor.Start()                                    // 启动压缩器
+	if options.CompressConfig.Enable {
+		// 确保压缩配置包含日志路径
+		compressConfig := options.CompressConfig      // 压缩配置
+		compressConfig.LogPaths = options.OutputPaths // 日志路径
+
+		compressor := NewLogCompressor(compressConfig)
+		l.compressor = compressor
+		compressor.Start()                                                // 启动压缩器
+		log.Printf("Compressor started with config: %+v", compressConfig) // 打印压缩器启动成功
+	}
 
 	// 初始化清理器
-	l.cleaner = NewLogCleaner(options.CleanupConfig) // 创建清理器
-	l.cleaner.Start()                                // 启动清理器
+	if options.CleanupConfig.Enable { // 如果启用清理
+		cleaner := NewLogCleaner(options.CleanupConfig) // 创建清理器
+		l.cleaner = cleaner                             // 设置清理器
+		cleaner.Start()                                 // 启动清理器
+	}
 
 	return l, nil
 }
 
-// getLogOutput 获取日志输出
-func (l *logrusLogger) getLogOutput() io.Writer {
-	var output io.Writer // 输出
-	if len(l.opts.OutputPaths) == 0 {
-		output = os.Stdout // 标准输出
-	} else {
-		queue, err := NewWriteQueue(l.fileManager, QueueConfig{
-			MaxSize:       10000,       // 最大大小
-			BatchSize:     100,         // 批量大小
-			FlushInterval: time.Second, // 刷新间隔
-			Workers:       2,           // 工作线程数
-		})
-		if err != nil {
-			return os.Stdout // 标准输出
-		}
-		output = queue // 设置输出
-	}
-
-	// 添加错误恢复
-	if l.opts.RecoveryConfig.Enable {
-		l.recoveryWriter = NewRecoveryWriter(output, l.opts.RecoveryConfig) // 创建错误恢复写入器
-		output = l.recoveryWriter                                           // 设置输出
-	}
-
-	// 如果启用异步写入，包装输出
-	if l.opts.AsyncConfig.Enable {
-		l.asyncWriter = NewAsyncWriter(output, l.opts.AsyncConfig) // 创建异步写入器
-		return l.asyncWriter                                       // 返回异步写入器
-	}
-
-	return output
-}
-
 // WithTime 添加时间字段
 func (l *logrusLogger) WithTime(t time.Time) types.Logger {
-	newLogger := l.clone() // 克隆logger实例
-	newLogger.fields = append(newLogger.fields, types.Field{
+	newLogger := l.clone()                                   // 克隆logger实例
+	newLogger.fields = append(newLogger.fields, types.Field{ // 添加时间字段
 		Key:   "time", // 时间字段名
 		Value: t,      // 时间字段值
 	})
@@ -114,11 +128,11 @@ func (l *logrusLogger) WithTime(t time.Time) types.Logger {
 
 // WithCaller 添加调用者信息
 func (l *logrusLogger) WithCaller(skip int) types.Logger {
-	newLogger := l.clone() // 克隆logger实例
-	if pc, file, line, ok := runtime.Caller(skip); ok {
-		f := runtime.FuncForPC(pc)
-		newLogger.fields = append(newLogger.fields, types.Field{
-			Key: "caller",
+	newLogger := l.clone()                              // 克隆logger实例
+	if pc, file, line, ok := runtime.Caller(skip); ok { // 获取调用者信息
+		f := runtime.FuncForPC(pc)                               // 获取函数信息
+		newLogger.fields = append(newLogger.fields, types.Field{ // 添加调用者信息
+			Key: "caller", // 调用者字段名
 			Value: map[string]interface{}{
 				"function": f.Name(), // 函数名
 				"file":     file,     // 文件名
@@ -141,81 +155,81 @@ func (l *logrusLogger) clone() *logrusLogger {
 
 // Debug 调试日志
 func (l *logrusLogger) Debug(ctx context.Context, msg string, fields ...types.Field) {
-	if l.logger.IsLevelEnabled(logrus.DebugLevel) {
-		l.log(ctx, logrus.DebugLevel, msg, fields...)
+	if l.logger.IsLevelEnabled(logrus.DebugLevel) { // 如果启用调试级别
+		l.log(ctx, logrus.DebugLevel, msg, fields...) // 记录调试日志
 	}
 }
 
 // Info 信息日志
 func (l *logrusLogger) Info(ctx context.Context, msg string, fields ...types.Field) {
-	if l.logger.IsLevelEnabled(logrus.InfoLevel) {
-		l.log(ctx, logrus.InfoLevel, msg, fields...)
+	if l.logger.IsLevelEnabled(logrus.InfoLevel) { // 如果启用信息级别
+		l.log(ctx, logrus.InfoLevel, msg, fields...) // 记录信息日志
 	}
 }
 
 // Warn 警告日志
 func (l *logrusLogger) Warn(ctx context.Context, msg string, fields ...types.Field) {
-	if l.logger.IsLevelEnabled(logrus.WarnLevel) {
-		l.log(ctx, logrus.WarnLevel, msg, fields...)
+	if l.logger.IsLevelEnabled(logrus.WarnLevel) { // 如果启用警告级别
+		l.log(ctx, logrus.WarnLevel, msg, fields...) // 记录警告日志
 	}
 }
 
 // Error 错误日志
 func (l *logrusLogger) Error(ctx context.Context, msg string, fields ...types.Field) {
-	if l.logger.IsLevelEnabled(logrus.ErrorLevel) {
-		l.log(ctx, logrus.ErrorLevel, msg, fields...)
+	if l.logger.IsLevelEnabled(logrus.ErrorLevel) { // 如果启用错误级别
+		l.log(ctx, logrus.ErrorLevel, msg, fields...) // 记录错误日志
 	}
 }
 
 // Fatal 严重日志
 func (l *logrusLogger) Fatal(ctx context.Context, msg string, fields ...types.Field) {
-	if l.logger.IsLevelEnabled(logrus.FatalLevel) {
-		l.log(ctx, logrus.FatalLevel, msg, fields...)
+	if l.logger.IsLevelEnabled(logrus.FatalLevel) { // 如果启用严重级别
+		l.log(ctx, logrus.FatalLevel, msg, fields...) // 记录严重日志
 	}
 }
 
 // Debugf 格式化调试日志
 func (l *logrusLogger) Debugf(ctx context.Context, format string, args ...interface{}) {
-	if l.logger.IsLevelEnabled(logrus.DebugLevel) {
-		l.log(ctx, logrus.DebugLevel, fmt.Sprintf(format, args...))
+	if l.logger.IsLevelEnabled(logrus.DebugLevel) { // 如果启用调试级别
+		l.log(ctx, logrus.DebugLevel, fmt.Sprintf(format, args...)) // 记录调试日志
 	}
 }
 
 // Infof 格式化信息日志
 func (l *logrusLogger) Infof(ctx context.Context, format string, args ...interface{}) {
-	if l.logger.IsLevelEnabled(logrus.InfoLevel) {
-		l.log(ctx, logrus.InfoLevel, fmt.Sprintf(format, args...))
+	if l.logger.IsLevelEnabled(logrus.InfoLevel) { // 如果启用信息级别
+		l.log(ctx, logrus.InfoLevel, fmt.Sprintf(format, args...)) // 记录信息日志
 	}
 }
 
 // Warnf 格式化警告日志
 func (l *logrusLogger) Warnf(ctx context.Context, format string, args ...interface{}) {
-	if l.logger.IsLevelEnabled(logrus.WarnLevel) {
-		l.log(ctx, logrus.WarnLevel, fmt.Sprintf(format, args...))
+	if l.logger.IsLevelEnabled(logrus.WarnLevel) { // 如果启用警告级别
+		l.log(ctx, logrus.WarnLevel, fmt.Sprintf(format, args...)) // 记录警告日志
 	}
 }
 
 // Errorf 格式化错误日志
 func (l *logrusLogger) Errorf(ctx context.Context, format string, args ...interface{}) {
-	if l.logger.IsLevelEnabled(logrus.ErrorLevel) {
-		l.log(ctx, logrus.ErrorLevel, fmt.Sprintf(format, args...))
+	if l.logger.IsLevelEnabled(logrus.ErrorLevel) { // 如果启用错误级别
+		l.log(ctx, logrus.ErrorLevel, fmt.Sprintf(format, args...)) // 记录错误日志
 	}
 }
 
 // Fatalf 格式化严重日志
 func (l *logrusLogger) Fatalf(ctx context.Context, format string, args ...interface{}) {
-	if l.logger.IsLevelEnabled(logrus.FatalLevel) {
-		l.log(ctx, logrus.FatalLevel, fmt.Sprintf(format, args...))
+	if l.logger.IsLevelEnabled(logrus.FatalLevel) { // 如果启用严重级别
+		l.log(ctx, logrus.FatalLevel, fmt.Sprintf(format, args...)) // 记录严重日志
 	}
 }
 
 // WithContext 添加上下文
 func (l *logrusLogger) WithContext(ctx context.Context) types.Logger {
-	if ctx == nil {
+	if ctx == nil { // 如果上下文为空
 		return l
 	}
-	fields := extractContextFields(ctx)
-	return l.WithFields(fields...)
+	fields := extractContextFields(ctx) // 提取上下文字段
+	return l.WithFields(fields...)      // 添加字段
 }
 
 // WithFields 添加字段
@@ -230,44 +244,51 @@ func (l *logrusLogger) WithFields(fields ...types.Field) types.Logger {
 
 // WithError 添加错误
 func (l *logrusLogger) WithError(err error) types.Logger {
-	return l.WithFields(types.Error(err))
+	return l.WithFields(types.Error(err)) // 添加错误字段
 }
 
 // SetLevel 设置日志级别
 func (l *logrusLogger) SetLevel(level types.Level) {
-	l.logger.SetLevel(logrus.Level(level))
+	l.logger.SetLevel(logrus.Level(level)) // 设置日志级别
 }
 
-// GetLevel 获取日志级别
+// GetLevel 取日志级别
 func (l *logrusLogger) GetLevel() types.Level {
-	return types.Level(l.logger.GetLevel())
+	return types.Level(l.logger.GetLevel()) // 取日志级别
 }
 
 // Sync 同步日志
 func (l *logrusLogger) Sync() error {
+	l.mu.Lock()   // 锁定
+	if l.closed { // 如果已关闭
+		l.mu.Unlock() // 解锁
+		return nil
+	}
+	l.mu.Unlock() // 解锁
+
 	var errs []error
 
 	// 停止压缩器
 	if l.compressor != nil {
-		l.compressor.Stop()
+		l.compressor.Stop() // 停止压缩器
 	}
 
 	// 停止清理器
 	if l.cleaner != nil {
-		l.cleaner.Stop()
+		l.cleaner.Stop() // 停止清理器
 	}
 
 	// 停止异步写入器
 	if l.asyncWriter != nil {
-		if err := l.asyncWriter.Stop(); err != nil {
-			errs = append(errs, err)
+		if err := l.asyncWriter.Stop(); err != nil { // 停止异步写入器
+			errs = append(errs, err) // 添加错误
 		}
 	}
 
 	// 关闭文件管理器
 	if l.fileManager != nil {
-		if err := l.fileManager.Close(); err != nil {
-			errs = append(errs, err)
+		if err := l.fileManager.Close(); err != nil { // 关闭文件管理器
+			errs = append(errs, err) // 添加错误
 		}
 	}
 
@@ -275,21 +296,20 @@ func (l *logrusLogger) Sync() error {
 	if l.writeQueue != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := l.writeQueue.Close(ctx); err != nil {
-			errs = append(errs, err)
+		if err := l.writeQueue.Close(ctx); err != nil { // 关闭写入队列
+			errs = append(errs, err) // 添加错误
 		}
 	}
 
-	// 如果有错误，返回错误信息
 	if len(errs) > 0 {
-		return fmt.Errorf("sync errors: %v", errs)
+		return fmt.Errorf("sync errors: %v", errs) // 返回同步错误
 	}
 	return nil
 }
 
 // log 内部日志方法
 func (l *logrusLogger) log(ctx context.Context, level logrus.Level, msg string, fields ...types.Field) {
-	if !l.logger.IsLevelEnabled(level) {
+	if !l.logger.IsLevelEnabled(level) { // 如果未启用日志级别
 		return
 	}
 
@@ -300,31 +320,31 @@ func (l *logrusLogger) log(ctx context.Context, level logrus.Level, msg string, 
 	allFields := make(logrus.Fields)
 
 	// 添加基础字段
-	allFields["timestamp"] = time.Now().Format(time.RFC3339)
-	allFields["level"] = level.String()
+	allFields["timestamp"] = time.Now().Format(time.RFC3339) // 添加时间字段
+	allFields["level"] = level.String()                      // 添加日志级别字段
 
 	// 添加上下文字段
 	if ctx != nil {
-		contextFields := extractContextFields(ctx)
+		contextFields := extractContextFields(ctx) // 提取上下文字段
 		for _, field := range contextFields {
-			allFields[field.Key] = field.Value
+			allFields[field.Key] = field.Value // 添加上下文字段
 		}
 	}
 
 	// 添加预设字段
 	for _, field := range l.fields {
-		allFields[field.Key] = field.Value
+		allFields[field.Key] = field.Value // 添加预设字段
 	}
 
 	// 添加当前字段
 	for _, field := range fields {
-		allFields[field.Key] = field.Value
+		allFields[field.Key] = field.Value // 添加当前字段
 	}
 
 	// 添加调用者信息
 	if l.opts.ReportCaller {
-		if pc, file, line, ok := runtime.Caller(2); ok {
-			f := runtime.FuncForPC(pc)
+		if pc, file, line, ok := runtime.Caller(2); ok { // 获取调用者信息
+			f := runtime.FuncForPC(pc) // 获取函数信息
 			allFields["caller"] = map[string]interface{}{
 				"function": f.Name(), // 函数名
 				"file":     file,     // 文件名
@@ -339,7 +359,7 @@ func (l *logrusLogger) log(ctx context.Context, level logrus.Level, msg string, 
 
 // extractContextFields 从上下文中提取字段
 func extractContextFields(ctx context.Context) []types.Field {
-	fields := make([]types.Field, 0)
+	fields := make([]types.Field, 0) // 创建字段列表
 
 	// 从上下文中提取标准字段
 	if ctx == nil {
@@ -347,18 +367,18 @@ func extractContextFields(ctx context.Context) []types.Field {
 	}
 
 	// 提取请求ID
-	if requestID, ok := ctx.Value("request_id").(string); ok {
-		fields = append(fields, types.Field{Key: "request_id", Value: requestID})
+	if requestID, ok := ctx.Value("request_id").(string); ok { // 提取请求ID
+		fields = append(fields, types.Field{Key: "request_id", Value: requestID}) // 添加请求ID字段
 	}
 
 	// 提取追踪ID
-	if traceID, ok := ctx.Value("trace_id").(string); ok {
-		fields = append(fields, types.Field{Key: "trace_id", Value: traceID})
+	if traceID, ok := ctx.Value("trace_id").(string); ok { // 提取追踪ID
+		fields = append(fields, types.Field{Key: "trace_id", Value: traceID}) // 添加追踪ID字段
 	}
 
 	// 提取用户ID
-	if userID, ok := ctx.Value("user_id").(string); ok {
-		fields = append(fields, types.Field{Key: "user_id", Value: userID})
+	if userID, ok := ctx.Value("user_id").(string); ok { // 提取用户ID
+		fields = append(fields, types.Field{Key: "user_id", Value: userID}) // 添加用户ID字段
 	}
 
 	return fields
@@ -380,4 +400,39 @@ func convertLevel(level types.Level) logrus.Level {
 	default: // 默认信息级别
 		return logrus.InfoLevel
 	}
+}
+
+// Close 实现 io.Closer 接口
+func (l *logrusLogger) Close() error {
+	l.mu.Lock()   // 锁定
+	if l.closed { // 如果已关闭
+		l.mu.Unlock() // 解锁
+		return nil
+	}
+	l.closed = true // 设置已关闭
+	l.mu.Unlock()   // 解锁
+
+	var errs []error
+
+	// 先同步日志
+	if err := l.Sync(); err != nil { // 同步日志
+		errs = append(errs, fmt.Errorf("sync error: %w", err)) // 添加错误
+	}
+
+	// 关闭所有writers
+	for _, w := range l.writers {
+		if closer, ok := w.(io.Closer); ok {
+			if err := closer.Close(); err != nil { // 关闭writer
+				errs = append(errs, fmt.Errorf("writer close error: %w", err)) // 添加错误
+			}
+		}
+	}
+
+	// 清空writers列表
+	l.writers = nil
+
+	if len(errs) > 0 {
+		return fmt.Errorf("close errors: %v", errs) // 返回关闭错误
+	}
+	return nil
 }

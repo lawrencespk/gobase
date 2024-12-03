@@ -3,6 +3,7 @@ package logrus
 import (
 	"compress/gzip"
 	"gobase/pkg/logger/types"
+	"io"
 	"time"
 )
 
@@ -57,6 +58,7 @@ func DefaultOptions() *Options {
 			MaxBatchWait:    time.Second * 5,  // 默认最大批处理等待时间为 5 秒
 			ShutdownTimeout: time.Second * 10, // 默认关闭超时时间为 10 秒
 		},
+		writers: []io.Writer{}, // 添加 writers 字段
 	}
 }
 
@@ -79,6 +81,7 @@ type Options struct {
 	AsyncConfig      AsyncConfig    // 异步配置
 	RecoveryConfig   RecoveryConfig // 恢复配置
 	QueueConfig      QueueConfig    // 队列配置 (使用 queue.go 中的定义)
+	writers          []io.Writer    // 添加 writers 字段
 }
 
 // Option 定义选项函数类型
@@ -87,7 +90,7 @@ type Option func(*Options)
 // WithLevel 设置日志级别
 func WithLevel(level types.Level) Option {
 	return func(o *Options) {
-		o.Level = level
+		o.Level = level // 设置日志级别
 	}
 }
 
@@ -116,7 +119,7 @@ func WithDevelopment(enabled bool) Option {
 // WithRotation 设置日志轮转配置
 func WithRotation(maxAge, rotationTime time.Duration, maxSize int64) Option {
 	return func(o *Options) {
-		o.MaxAge = maxAge
+		o.MaxAge = maxAge             // 设置日志保留时间
 		o.RotationTime = rotationTime // 设置日志轮转时间
 		o.MaxSize = maxSize           // 设置单个日志文件最大大小
 	}
@@ -189,5 +192,15 @@ func WithCleanup(config CleanupConfig) Option {
 func WithRecovery(config RecoveryConfig) Option {
 	return func(o *Options) {
 		o.RecoveryConfig = config // 设置恢复配置
+	}
+}
+
+// WithOutput 设置输出
+func WithOutput(w io.Writer) Option {
+	return func(o *Options) {
+		if o.writers == nil { // 如果writers为空
+			o.writers = make([]io.Writer, 0) // 创建新的writers
+		}
+		o.writers = append(o.writers, w) // 添加writer
 	}
 }

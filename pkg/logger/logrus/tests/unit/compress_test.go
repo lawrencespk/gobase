@@ -35,10 +35,19 @@ func TestCompressService(t *testing.T) {
 	// 创建测试文件
 	testFile := filepath.Join(tmpDir, "test.log")
 	content := "test log content"
-	err := os.WriteFile(testFile, []byte(content), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
+
+	// 使用函数作用域确保文件被关闭
+	func() {
+		f, err := os.Create(testFile)
+		if err != nil {
+			t.Fatalf("Failed to create test file: %v", err)
+		}
+		defer f.Close()
+
+		if _, err := f.WriteString(content); err != nil {
+			t.Fatalf("Failed to write to test file: %v", err)
+		}
+	}()
 
 	// 创建压缩器
 	config := logrus.CompressConfig{
@@ -75,26 +84,28 @@ func TestCompressService(t *testing.T) {
 	}
 
 	// 验证压缩文件内容
-	f, err := os.Open(compressedFile)
-	if err != nil {
-		t.Fatalf("Failed to open compressed file: %v", err)
-	}
-	defer f.Close()
+	func() {
+		f, err := os.Open(compressedFile)
+		if err != nil {
+			t.Fatalf("Failed to open compressed file: %v", err)
+		}
+		defer f.Close()
 
-	gr, err := gzip.NewReader(f)
-	if err != nil {
-		t.Fatalf("Failed to create gzip reader: %v", err)
-	}
-	defer gr.Close()
+		gr, err := gzip.NewReader(f)
+		if err != nil {
+			t.Fatalf("Failed to create gzip reader: %v", err)
+		}
+		defer gr.Close()
 
-	decompressed, err := io.ReadAll(gr)
-	if err != nil {
-		t.Fatalf("Failed to read compressed content: %v", err)
-	}
+		decompressed, err := io.ReadAll(gr)
+		if err != nil {
+			t.Fatalf("Failed to read compressed content: %v", err)
+		}
 
-	if string(decompressed) != content {
-		t.Error("Decompressed content does not match original")
-	}
+		if string(decompressed) != content {
+			t.Error("Decompressed content does not match original")
+		}
+	}()
 }
 
 // TestDisabledCompressor 测试禁用压缩器
