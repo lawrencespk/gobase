@@ -28,69 +28,52 @@ type logrusLogger struct {
 
 // NewLogger 创建新的logrus日志实例
 func NewLogger(fm *FileManager, config QueueConfig, options *Options) (*logrusLogger, error) {
-	queue, err := NewWriteQueue(fm, config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create write queue: %w", err)
-	}
-
 	l := &logrusLogger{
-		logger:     logrus.New(),         // 创建新的logrus日志实例
-		opts:       options,              // 确保 options 被正确赋值
-		ctx:        context.Background(), // 上下文
-		writeQueue: queue,                // 使用正确的变量名
+		logger:      logrus.New(),         // 创建新的logrus日志实例
+		opts:        options,              // 配置
+		ctx:         context.Background(), // 上下文
+		fileManager: fm,                   // 文件管理器
 	}
 
-	// 配置logrus
+	// 初始化写入队列
+	queue, err := NewWriteQueue(fm, config) // 创建写入队列
+	if err != nil {
+		return nil, fmt.Errorf("failed to create write queue: %w", err) // 创建写入队列失败
+	}
+	l.writeQueue = queue // 设置写入队列
+
+	// 配置 logrus
 	l.logger.SetLevel(convertLevel(options.Level)) // 设置日志级别
-	l.logger.SetFormatter(newFormatter(options))   // 使用自定义格式化器
+	l.logger.SetFormatter(newFormatter(options))   // 设置格式化器
 	l.logger.SetReportCaller(true)                 // 设置调用者
 
-	// 设置输出
-	l.logger.SetOutput(l.getLogOutput())
+	// 设置输出 - 现在 fileManager 已经可用
+	l.logger.SetOutput(l.getLogOutput()) // 设置输出
 
-	// 添加hooks
+	// 添加 hooks
 	if len(options.ElasticURLs) > 0 {
-		hook, err := newElasticHook(options)
+		hook, err := newElasticHook(options) // 创建ElasticHook
 		if err == nil {
-			l.logger.AddHook(hook)
+			l.logger.AddHook(hook) // 添加hook
 		}
 	}
 
 	// 初始化压缩器
-	l.compressor = NewLogCompressor(options.CompressConfig)
-	l.compressor.Start()
+	l.compressor = NewLogCompressor(options.CompressConfig) // 创建压缩器
+	l.compressor.Start()                                    // 启动压缩器
 
 	// 初始化清理器
-	l.cleaner = NewLogCleaner(options.CleanupConfig)
-	l.cleaner.Start()
-
-	// 初始化文件管理器
-	l.fileManager = NewFileManager(FileOptions{
-		BufferSize:    32 * 1024,              // 32KB
-		FlushInterval: time.Second,            // 1秒
-		MaxOpenFiles:  100,                    // 最大打开文件数
-		DefaultPath:   options.OutputPaths[0], // 使用配置的第一个输出路径作为默认路径
-	})
-
-	// 初始化写入队列
-	l.writeQueue, err = NewWriteQueue(l.fileManager, QueueConfig{
-		MaxSize:       10000,       // 最大大小
-		BatchSize:     100,         // 批量大小
-		FlushInterval: time.Second, // 刷新间隔
-		Workers:       2,           // 工作线程数
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize write queue: %w", err)
-	}
+	l.cleaner = NewLogCleaner(options.CleanupConfig) // 创建清理器
+	l.cleaner.Start()                                // 启动清理器
 
 	return l, nil
 }
 
 // getLogOutput 获取日志输出
 func (l *logrusLogger) getLogOutput() io.Writer {
-	var output io.Writer
+	var output io.Writer // 输出
 	if len(l.opts.OutputPaths) == 0 {
-		output = os.Stdout
+		output = os.Stdout // 标准输出
 	} else {
 		queue, err := NewWriteQueue(l.fileManager, QueueConfig{
 			MaxSize:       10000,       // 最大大小
@@ -99,21 +82,21 @@ func (l *logrusLogger) getLogOutput() io.Writer {
 			Workers:       2,           // 工作线程数
 		})
 		if err != nil {
-			return os.Stdout
+			return os.Stdout // 标准输出
 		}
-		output = queue
+		output = queue // 设置输出
 	}
 
 	// 添加错误恢复
 	if l.opts.RecoveryConfig.Enable {
-		l.recoveryWriter = NewRecoveryWriter(output, l.opts.RecoveryConfig)
-		output = l.recoveryWriter
+		l.recoveryWriter = NewRecoveryWriter(output, l.opts.RecoveryConfig) // 创建错误恢复写入器
+		output = l.recoveryWriter                                           // 设置输出
 	}
 
 	// 如果启用异步写入，包装输出
 	if l.opts.AsyncConfig.Enable {
-		l.asyncWriter = NewAsyncWriter(output, l.opts.AsyncConfig)
-		return l.asyncWriter
+		l.asyncWriter = NewAsyncWriter(output, l.opts.AsyncConfig) // 创建异步写入器
+		return l.asyncWriter                                       // 返回异步写入器
 	}
 
 	return output
@@ -121,7 +104,7 @@ func (l *logrusLogger) getLogOutput() io.Writer {
 
 // WithTime 添加时间字段
 func (l *logrusLogger) WithTime(t time.Time) types.Logger {
-	newLogger := l.clone()
+	newLogger := l.clone() // 克隆logger实例
 	newLogger.fields = append(newLogger.fields, types.Field{
 		Key:   "time", // 时间字段名
 		Value: t,      // 时间字段值
@@ -131,7 +114,7 @@ func (l *logrusLogger) WithTime(t time.Time) types.Logger {
 
 // WithCaller 添加调用者信息
 func (l *logrusLogger) WithCaller(skip int) types.Logger {
-	newLogger := l.clone()
+	newLogger := l.clone() // 克隆logger实例
 	if pc, file, line, ok := runtime.Caller(skip); ok {
 		f := runtime.FuncForPC(pc)
 		newLogger.fields = append(newLogger.fields, types.Field{

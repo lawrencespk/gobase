@@ -2,6 +2,8 @@ package logger
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -10,18 +12,30 @@ import (
 )
 
 var (
-	defaultLogger types.Logger
-	once          sync.Once
+	defaultLogger types.Logger // 默认日志实例
+	once          sync.Once    // 确保单例模式
 )
+
+// getLogPath 获取日志路径
+func getLogPath() string {
+	if path := os.Getenv("LOG_PATH"); path != "" { // 从环境变量获取日志路径
+		return path
+	}
+	return "logs/app.log" // 默认日志路径
+}
 
 // GetLogger 获取默认日志实例
 func GetLogger() types.Logger {
 	once.Do(func() {
+		// 从环境变量获取日志路径
+		logPath := getLogPath() // 获取日志路径
+		ensureLogDir(logPath)   // 确保日志目录存在
+
 		fm := logrus.NewFileManager(logrus.FileOptions{
-			BufferSize:    32 * 1024,      // 缓冲区大小
-			FlushInterval: time.Second,    // 刷新间隔
-			MaxOpenFiles:  100,            // 最大打开文件数
-			DefaultPath:   "logs/app.log", // 默认路径
+			BufferSize:    32 * 1024,   // 缓冲区大小
+			FlushInterval: time.Second, // 刷新间隔
+			MaxOpenFiles:  100,         // 最大打开文件数
+			DefaultPath:   logPath,     // 默认路径
 		})
 
 		config := logrus.QueueConfig{
@@ -46,18 +60,31 @@ func GetLogger() types.Logger {
 	return defaultLogger
 }
 
+// ensureLogDir 确保日志目录存在
+func ensureLogDir(logPath string) {
+	dir := filepath.Dir(logPath) // 获取日志目录
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		// 如果创建目录失败，可以打印错误或使用其他方式处理
+		panic(err)
+	}
+}
+
 // SetLogger 设置默认日志实例
 func SetLogger(logger types.Logger) {
-	defaultLogger = logger
+	defaultLogger = logger // 设置默认日志实例
 }
 
 // NewLogger 创建新的日志实例
 func NewLogger(opts ...logrus.Option) (types.Logger, error) {
+	// 从环境变量获取日志路径
+	logPath := getLogPath()
+	ensureLogDir(logPath)
+
 	fm := logrus.NewFileManager(logrus.FileOptions{
-		BufferSize:    32 * 1024,      // 缓冲区大小
-		FlushInterval: time.Second,    // 刷新间隔
-		MaxOpenFiles:  100,            // 最大打开文件数
-		DefaultPath:   "logs/app.log", // 默认路径
+		BufferSize:    32 * 1024,   // 缓冲区大小
+		FlushInterval: time.Second, // 刷新间隔
+		MaxOpenFiles:  100,         // 最大打开文件数
+		DefaultPath:   logPath,     // 默认路径
 	})
 
 	config := logrus.QueueConfig{

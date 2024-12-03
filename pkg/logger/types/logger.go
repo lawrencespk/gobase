@@ -71,3 +71,9 @@ type Logger interface {
 	// 同步方法
 	Sync() error
 }
+
+// LevelLogger 定义了带日志级别的logger接口
+type LevelLogger interface {
+	Logger
+	GetLevel() Level // 获取日志级别
+}
