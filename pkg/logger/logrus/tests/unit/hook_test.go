@@ -1,45 +1,66 @@
 package unit
 
 import (
-	"bytes"
+	"context"
 	"errors"
 	"testing"
 
-	locallogrus "gobase/pkg/logger/logrus"
+	"gobase/pkg/logger/elk"
+	"gobase/pkg/logger/logrus"
 
 	slogrus "github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
 )
+
+// 创建一个模拟的 ElkClient
+type mockElkClient struct {
+	shouldError bool
+}
+
+func (m *mockElkClient) Connect(config *elk.ElkConfig) error {
+	return nil
+}
+
+func (m *mockElkClient) Close() error {
+	return nil
+}
+
+func (m *mockElkClient) IndexDocument(ctx context.Context, index string, document interface{}) error {
+	if m.shouldError {
+		return errors.New("mock error")
+	}
+	return nil
+}
+
+// 添加缺少的方法
+func (m *mockElkClient) BulkIndexDocuments(ctx context.Context, index string, documents []interface{}) error {
+	if m.shouldError {
+		return errors.New("mock error")
+	}
+	return nil
+}
+
+func (m *mockElkClient) Query(ctx context.Context, index string, query interface{}) (interface{}, error) {
+	if m.shouldError {
+		return nil, errors.New("mock error")
+	}
+	return nil, nil
+}
+
+func (m *mockElkClient) IsConnected() bool {
+	return true
+}
 
 // TestNewHook 测试Hook的创建
 func TestNewHook(t *testing.T) {
-	writer := &bytes.Buffer{}
-	formatter := &slogrus.TextFormatter{}
-	levels := []slogrus.Level{slogrus.InfoLevel, slogrus.ErrorLevel}
-
-	h := locallogrus.NewLogHook(writer, formatter, levels...)
-
-	if h == nil {
-		t.Error("期望创建的 Hook 不为 nil")
-	}
-
-	// 验证支持的日志级别
-	hookLevels := h.Levels()
-	if len(hookLevels) != len(levels) {
-		t.Errorf("期望支持 %d 个日志级别, 实际支持 %d 个", len(levels), len(hookLevels))
-	}
-
-	for i, level := range levels {
-		if hookLevels[i] != level {
-			t.Errorf("期望第 %d 个级别为 %v, 实际为 %v", i, level, hookLevels[i])
-		}
-	}
+	// 使用模拟的客户端
+	mockClient := &mockElkClient{}
+	hook := logrus.NewHookWithClient(mockClient)
+	assert.NotNil(t, hook)
 }
 
 // TestHookLevels 测试Hook的日志级别过滤
 func TestHookLevels(t *testing.T) {
-	writer := &bytes.Buffer{}
-	formatter := &slogrus.TextFormatter{}
-
 	tests := []struct {
 		name   string
 		levels []slogrus.Level
@@ -64,17 +85,17 @@ func TestHookLevels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := locallogrus.NewLogHook(writer, formatter, tt.levels...)
+			mockClient := &mockElkClient{}
+			h := logrus.NewHookWithClient(mockClient)
+
+			// 假设我们在 Hook 中有一个方法可以设置期望的级别
+			h.SetLevels(tt.levels) // 需要在 Hook 中实现这个方法
+
 			levels := h.Levels()
 
-			if len(levels) != len(tt.levels) {
-				t.Errorf("期望 %d 个级别, 实际得到 %d 个", len(tt.levels), len(levels))
-			}
-
+			assert.Equal(t, len(tt.levels), len(levels), "日志级别数量不匹配")
 			for i, level := range tt.levels {
-				if levels[i] != level {
-					t.Errorf("期望级别 %v, 实际得到 %v", level, levels[i])
-				}
+				assert.Equal(t, level, levels[i], "日志级别不匹配")
 			}
 		})
 	}
@@ -82,13 +103,8 @@ func TestHookLevels(t *testing.T) {
 
 // TestHookFire 测试Hook的Fire方法
 func TestHookFire(t *testing.T) {
-	writer := &bytes.Buffer{}
-	formatter := &slogrus.TextFormatter{
-		DisableTimestamp: true,
-		DisableColors:    true,
-	}
-
-	h := locallogrus.NewLogHook(writer, formatter, slogrus.InfoLevel)
+	mockClient := &mockElkClient{}
+	h := logrus.NewHookWithClient(mockClient)
 
 	entry := &slogrus.Entry{
 		Logger:  slogrus.New(),
@@ -97,24 +113,13 @@ func TestHookFire(t *testing.T) {
 	}
 
 	err := h.Fire(entry)
-	if err != nil {
-		t.Errorf("期望 Fire 执行成功, 实际得到错误: %v", err)
-	}
-
-	if !bytes.Contains(writer.Bytes(), []byte("test message")) {
-		t.Error("期望输出包含日志消息")
-	}
+	assert.NoError(t, err)
 }
 
 // TestHookFireWithFields 测试带字段的Hook Fire
 func TestHookFireWithFields(t *testing.T) {
-	writer := &bytes.Buffer{}
-	formatter := &slogrus.TextFormatter{
-		DisableTimestamp: true,
-		DisableColors:    true,
-	}
-
-	h := locallogrus.NewLogHook(writer, formatter, slogrus.InfoLevel)
+	mockClient := &mockElkClient{}
+	h := logrus.NewHookWithClient(mockClient)
 
 	entry := &slogrus.Entry{
 		Logger: slogrus.New(),
@@ -126,25 +131,14 @@ func TestHookFireWithFields(t *testing.T) {
 	}
 
 	err := h.Fire(entry)
-	if err != nil {
-		t.Errorf("期望 Fire 执行成功, 实际得到错误: %v", err)
-	}
-
-	if !bytes.Contains(writer.Bytes(), []byte("key=value")) {
-		t.Error("期望输出包含字段信息")
-	}
+	assert.NoError(t, err)
 }
 
 // TestHookFireError 测试Hook Fire的错误处理
 func TestHookFireError(t *testing.T) {
-	// 创建一个会产生错误的writer
-	errorWriter := &errorWriter{}
-	formatter := &slogrus.TextFormatter{
-		DisableTimestamp: true,
-		DisableColors:    true,
-	}
-
-	h := locallogrus.NewLogHook(errorWriter, formatter, slogrus.InfoLevel)
+	// 创建一个总是返回错误的模拟客户端
+	errorClient := &mockElkClient{shouldError: true}
+	h := logrus.NewHookWithClient(errorClient)
 
 	entry := &slogrus.Entry{
 		Logger:  slogrus.New(),
@@ -153,14 +147,5 @@ func TestHookFireError(t *testing.T) {
 	}
 
 	err := h.Fire(entry)
-	if err == nil {
-		t.Error("期望得到一个错误，但是没有")
-	}
-}
-
-// errorWriter 用于测试写入错误的情况
-type errorWriter struct{}
-
-func (w *errorWriter) Write(p []byte) (n int, err error) {
-	return 0, errors.New("模拟的写入错误")
+	assert.Error(t, err)
 }

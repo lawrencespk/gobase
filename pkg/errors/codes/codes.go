@@ -88,6 +88,14 @@ const (
 	IntegrationError = "2502" // 集成错误
 	DependencyError  = "2503" // 依赖错误
 
+	// ELK相关错误码 (2510-2519)
+	ELKConnectionError = "2510" // ELK连接错误
+	ELKIndexError      = "2511" // ELK索引错误
+	ELKQueryError      = "2512" // ELK查询错误
+	ELKBulkError       = "2513" // ELK批量操作错误
+	ELKConfigError     = "2514" // ELK配置错误
+	ELKTimeoutError    = "2515" // ELK超时错误
+
 	// 任务处理错误码 (2600-2699)
 	TaskError      = "2600" // 任务错误
 	JobError       = "2601" // 作业错误

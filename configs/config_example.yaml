@@ -1,0 +1,69 @@
+elk:
+  addresses:
+    - "http://localhost:9200" # 地址
+  username: "your_username" # 用户名
+  password: "your_password" # 密码
+  index: "logs" # 索引  
+  timeout: 30 # 超时时间
+  bulk:
+    batchSize: 1000 # 批处理大小
+    flushBytes: 5242880  # 5MB
+    interval: 30s # 30秒
+
+logger:
+  development: false
+  level: "info"              # debug, info, warn, error
+  format: "text"            # text, json
+  reportCaller: true
+  timeFormat: "RFC3339"
+  disableConsole: false
+  outputPaths:
+    - "stdout"
+  errorOutputPaths:
+    - "stderr"
+  maxAge: "168h"            # 7天，日志保留时间
+  rotationTime: "24h"       # 日志轮转时间
+  maxSize: 100             # 单个日志文件最大大小(MB)
+  rotation:
+    enable: true
+    filename: "logs/app.log"
+    maxSize: 100            # MB
+    maxAge: 7              # days
+    rotationTime: "24h"
+    maxBackups: 3
+    compress: true
+  compress:
+    enable: true
+    algorithm: "gzip"
+    level: 9
+    deleteSource: true
+    interval: "1h"
+  cleanup:
+    enable: true
+    maxBackups: 3
+    maxAge: 7
+    interval: "24h"
+  async:
+    enable: true
+    bufferSize: 8192
+    flushInterval: "1s"
+    blockOnFull: false
+    dropOnFull: true
+    flushOnExit: true
+  recovery:
+    enable: true
+    maxRetries: 3
+    retryInterval: "1s"
+    enableStackTrace: true
+    maxStackSize: 4096
+  queue:
+    maxSize: 1000
+    batchSize: 100
+    workers: 1
+    flushInterval: "1s"
+    retryCount: 3
+    retryInterval: "1s"
+    maxBatchWait: "5s"
+    shutdownTimeout: "10s"
+  elk:
+    enable: false
