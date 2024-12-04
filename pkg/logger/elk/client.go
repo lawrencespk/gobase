@@ -8,71 +8,179 @@ import (
 	"time"
 
 	"github.com/olivere/elastic/v7"
+	"github.com/stretchr/testify/mock"
 )
+
+// IndicesExistsServiceInterface 定义索引存在检查服务的接口
+type IndicesExistsServiceInterface interface {
+	Do(ctx context.Context) (bool, error)
+}
+
+// IndicesCreateServiceInterface 定义索引创建服务的接口
+type IndicesCreateServiceInterface interface {
+	BodyJson(mapping map[string]interface{}) IndicesCreateServiceInterface
+	Do(ctx context.Context) (interface{}, error)
+}
+
+// MockElasticClientInterface 定义模拟客户端需要实现的接口
+type MockElasticClientInterface interface {
+	IndexExists(indices ...string) IndicesExistsServiceInterface
+	CreateIndex(name string) IndicesCreateServiceInterface
+	// 其他需要的方法
+}
+
+// ElasticClientInterface 统一的客户端接口
+type ElasticClientInterface interface {
+	MockElasticClientInterface
+	BulkProcessor() *elastic.BulkProcessorService
+	// 添加其他需要的方法
+}
+
+// MockElasticClient 用于测试的模拟客户端
+type MockElasticClient struct {
+	mock.Mock
+}
+
+func (m *MockElasticClient) IndexExists(indices ...string) IndicesExistsServiceInterface {
+	args := m.Called(indices)
+	return args.Get(0).(IndicesExistsServiceInterface)
+}
+
+func (m *MockElasticClient) CreateIndex(name string) IndicesCreateServiceInterface {
+	args := m.Called(name)
+	return args.Get(0).(IndicesCreateServiceInterface)
+}
+
+func (m *MockElasticClient) BulkProcessor() *elastic.BulkProcessorService {
+	args := m.Called()
+	return args.Get(0).(*elastic.BulkProcessorService)
+}
+
+func (m *MockElasticClient) Do(ctx context.Context) (bool, error) {
+	args := m.Called(ctx)
+	return args.Bool(0), args.Error(1)
+}
+
+// ElasticClientAdapter 适配器结构体
+type ElasticClientAdapter struct {
+	*elastic.Client
+}
+
+// IndexExists 实现接口方法
+func (a *ElasticClientAdapter) IndexExists(indices ...string) IndicesExistsServiceInterface {
+	return &IndicesExistsServiceAdapter{a.Client.IndexExists(indices...)}
+}
+
+// CreateIndex 实现接口方法
+func (a *ElasticClientAdapter) CreateIndex(name string) IndicesCreateServiceInterface {
+	return &IndicesCreateServiceAdapter{
+		IndicesCreateService: a.Client.CreateIndex(name),
+	}
+}
+
+// BulkProcessor 实现接口方法
+func (a *ElasticClientAdapter) BulkProcessor() *elastic.BulkProcessorService {
+	return a.Client.BulkProcessor()
+}
+
+// IndicesExistsServiceAdapter 适配器
+type IndicesExistsServiceAdapter struct {
+	*elastic.IndicesExistsService
+}
+
+// IndicesCreateServiceAdapter 适配器
+type IndicesCreateServiceAdapter struct {
+	*elastic.IndicesCreateService
+}
+
+// BodyJson 实现接口方法
+func (a *IndicesCreateServiceAdapter) BodyJson(mapping map[string]interface{}) IndicesCreateServiceInterface {
+	// 调用底层服务的 BodyJson 方法，并返回包装后的适配器
+	return &IndicesCreateServiceAdapter{
+		IndicesCreateService: a.IndicesCreateService.BodyJson(mapping),
+	}
+}
+
+// Do 实现接口方法
+func (a *IndicesCreateServiceAdapter) Do(ctx context.Context) (interface{}, error) {
+	return a.IndicesCreateService.Do(ctx)
+}
 
 // ElkClient Elasticsearch客户端
 type ElkClient struct {
-	client    *elastic.Client        // ES客户端
-	config    *ElasticConfig         // 配置
-	buffer    *logBuffer             // 日志缓冲
-	processor *elastic.BulkProcessor // 批处理器
-	mu        sync.RWMutex           // 读写锁
-	closed    bool                   // 是否已关闭
+	client    ElasticClientInterface
+	config    *ElasticConfig
+	buffer    *logBuffer
+	processor *elastic.BulkProcessor
+	mu        sync.RWMutex
+	closed    bool
+}
+
+// SetClient 设置 Elasticsearch 客户端 (用于测试)
+func (c *ElkClient) SetClient(client interface{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if esClient, ok := client.(*elastic.Client); ok {
+		c.client = &ElasticClientAdapter{esClient}
+	} else if mockClient, ok := client.(ElasticClientInterface); ok {
+		c.client = mockClient
+	}
 }
 
 // NewElkClient 创建新的ES客户端
 func NewElkClient(config *ElasticConfig) (*ElkClient, error) {
 	if config == nil {
-		config = DefaultElasticConfig() // 使用默认配置
+		config = DefaultElasticConfig()
 	}
 
 	// 创建ES客户端选项
 	options := []elastic.ClientOptionFunc{
-		elastic.SetURL(config.Addresses...),        // 设置URL
-		elastic.SetSniff(config.Sniff),             // 设置嗅探
-		elastic.SetHealthcheck(config.Healthcheck), // 设置健康检查
-		elastic.SetRetrier(elastic.NewBackoffRetrier(elastic.NewExponentialBackoff(time.Millisecond, 5*time.Second))), // 设置重试器
+		elastic.SetURL(config.Addresses...),
+		elastic.SetSniff(config.Sniff),
+		elastic.SetHealthcheck(config.Healthcheck),
+		elastic.SetRetrier(elastic.NewBackoffRetrier(elastic.NewExponentialBackoff(time.Millisecond, 5*time.Second))),
 	}
 
 	// 添加认证
 	if config.Username != "" && config.Password != "" {
-		options = append(options, elastic.SetBasicAuth(config.Username, config.Password)) // 设置基本认证
+		options = append(options, elastic.SetBasicAuth(config.Username, config.Password))
 	}
 
 	// 添加TLS配置
 	if config.TLS != nil {
-		options = append(options, elastic.SetHttpClient(&http.Client{ // 设置HTTP客户端
+		options = append(options, elastic.SetHttpClient(&http.Client{
 			Transport: &http.Transport{
-				TLSClientConfig: config.TLS, // 设置TLS配置
+				TLSClientConfig: config.TLS,
 			},
-			Timeout: config.DialTimeout, // 设置超时时间
+			Timeout: config.DialTimeout,
 		}))
 	}
 
 	// 创建客户端
-	client, err := elastic.NewClient(options...)
+	esClient, err := elastic.NewClient(options...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create elasticsearch client: %w", err) // 创建ES客户端失败
+		return nil, fmt.Errorf("failed to create elasticsearch client: %w", err)
 	}
 
-	// 创建ElkClient实例
+	// 创建ElkClient实例，使用适配器包装elastic.Client
 	elkClient := &ElkClient{
-		client: client, // ES客户端
-		config: config, // 配置
+		client: &ElasticClientAdapter{esClient},
+		config: config,
 	}
 
 	// 创建日志缓冲区
-	elkClient.buffer = newLogBuffer(client, config)
+	elkClient.buffer = newLogBuffer(esClient, config)
 
 	// 创建批处理器
-	processor, err := client.BulkProcessor().
-		Name("ElkLogProcessor").             // 设置名称
-		Workers(config.Workers).             // 设置工作线程数
-		BulkActions(config.BatchSize).       // 设置批量大小
-		FlushInterval(config.FlushInterval). // 设置刷新间隔
-		Do(context.Background())             // 执行
+	processor, err := esClient.BulkProcessor().
+		Name("ElkLogProcessor").
+		Workers(config.Workers).
+		BulkActions(config.BatchSize).
+		FlushInterval(config.FlushInterval).
+		Do(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("failed to create bulk processor: %w", err) // 创建批处理器失败
+		return nil, fmt.Errorf("failed to create bulk processor: %w", err)
 	}
 
 	elkClient.processor = processor
@@ -81,28 +189,35 @@ func NewElkClient(config *ElasticConfig) (*ElkClient, error) {
 
 // CreateIndex 创建索引
 func (c *ElkClient) CreateIndex(indexName string) error {
-	ctx := context.Background()                            // 上下文
-	exists, err := c.client.IndexExists(indexName).Do(ctx) // 检查索引是否存在
+	if c.client == nil {
+		return fmt.Errorf("client is not initialized")
+	}
+
+	// 验证设置
+	if c.config.NumberOfShards <= 0 {
+		return fmt.Errorf("invalid settings: number_of_shards must be greater than 0")
+	}
+
+	fmt.Printf("Creating index: %s\n", indexName)
+	ctx := context.Background()
+	exists, err := c.client.IndexExists(indexName).Do(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to check index existence: %w", err) // 检查索引是否存在失败
+		return fmt.Errorf("failed to check index existence: %w", err)
 	}
 
 	if !exists {
-		// 创建索引
 		createIndex := c.client.CreateIndex(indexName)
-
-		// 设置索引配置
 		indexSettings := map[string]interface{}{
-			"settings": map[string]interface{}{ // 设置索引配置
-				"number_of_shards":   c.config.NumberOfShards,   // 分片数
-				"number_of_replicas": c.config.NumberOfReplicas, // 副本数
-				"refresh_interval":   c.config.RefreshInterval,  // 刷新间隔
+			"settings": map[string]interface{}{
+				"number_of_shards":   c.config.NumberOfShards,
+				"number_of_replicas": c.config.NumberOfReplicas,
+				"refresh_interval":   c.config.RefreshInterval,
 			},
 		}
 
 		_, err = createIndex.BodyJson(indexSettings).Do(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to create index: %w", err) // 创建索引失败
+			return fmt.Errorf("failed to create index: %w", err)
 		}
 	}
 
@@ -158,4 +273,24 @@ func (c *ElkClient) Close() error {
 	}
 
 	return nil
+}
+
+// 为了支持测试，添加一个用于测试的构造函数
+func NewTestElkClient(mockClient ...ElasticClientInterface) *ElkClient {
+	client := &ElkClient{
+		config: DefaultElasticConfig(),
+	}
+
+	if len(mockClient) > 0 {
+		client.client = mockClient[0]
+	} else {
+		client.client = new(MockElasticClient)
+	}
+
+	return client
+}
+
+// SetConfig 设置配置（用于测试）
+func (c *ElkClient) SetConfig(config *ElasticConfig) {
+	c.config = config
 }
