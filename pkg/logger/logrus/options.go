@@ -2,6 +2,7 @@ package logrus
 
 import (
 	"compress/gzip"
+	"gobase/pkg/logger/elk"
 	"gobase/pkg/logger/types"
 	"io"
 	"time"
@@ -58,30 +59,32 @@ func DefaultOptions() *Options {
 			MaxBatchWait:    time.Second * 5,  // 默认最大批处理等待时间为 5 秒
 			ShutdownTimeout: time.Second * 10, // 默认关闭超时时间为 10 秒
 		},
-		writers: []io.Writer{}, // 添加 writers 字段
+		writers:       []io.Writer{},              // 添加 writers 字段
+		ElasticConfig: elk.DefaultElasticConfig(), // 添加 ElasticConfig 字段
 	}
 }
 
 // Options 定义 Elastic Hook 的配置选项
 type Options struct {
-	ElasticURLs      []string       // Elasticsearch URL 列表
-	ElasticIndex     string         // Elasticsearch 索引名称
-	Development      bool           // 是否为开发模式
-	Level            types.Level    // 日志级别
-	ReportCaller     bool           // 是否报告调用者信息
-	TimeFormat       string         // 时间格式
-	MaxAge           time.Duration  // 日志保留时间
-	RotationTime     time.Duration  // 日志轮转时间
-	MaxSize          int64          // 单个日志文件最大大小(MB)
-	Compress         bool           // 是否压缩旧日志
-	OutputPaths      []string       // 输出路径
-	ErrorOutputPaths []string       // 错误输出路径
-	CompressConfig   CompressConfig // 压缩配置
-	CleanupConfig    CleanupConfig  // 清理配置
-	AsyncConfig      AsyncConfig    // 异步配置
-	RecoveryConfig   RecoveryConfig // 恢复配置
-	QueueConfig      QueueConfig    // 队列配置 (使用 queue.go 中的定义)
-	writers          []io.Writer    // 添加 writers 字段
+	ElasticURLs      []string           // Elasticsearch URL 列表
+	ElasticIndex     string             // Elasticsearch 索引名称
+	Development      bool               // 是否为开发模式
+	Level            types.Level        // 日志级别
+	ReportCaller     bool               // 是否报告调用者信息
+	TimeFormat       string             // 时间格式
+	MaxAge           time.Duration      // 日志保留时间
+	RotationTime     time.Duration      // 日志轮转时间
+	MaxSize          int64              // 单个日志文件最大大小(MB)
+	Compress         bool               // 是否压缩旧日志
+	OutputPaths      []string           // 输出路径
+	ErrorOutputPaths []string           // 错误输出路径
+	CompressConfig   CompressConfig     // 压缩配置
+	CleanupConfig    CleanupConfig      // 清理配置
+	AsyncConfig      AsyncConfig        // 异步配置
+	RecoveryConfig   RecoveryConfig     // 恢复配置
+	QueueConfig      QueueConfig        // 队列配置 (使用 queue.go 中的定义)
+	writers          []io.Writer        // 添加 writers 字段
+	ElasticConfig    *elk.ElasticConfig // 添加 ElasticConfig 字段
 }
 
 // Option 定义选项函数类型

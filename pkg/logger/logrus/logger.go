@@ -45,13 +45,13 @@ func NewLogger(fm *FileManager, config QueueConfig, options *Options) (*logrusLo
 
 	// 处理自定义writers
 	if len(options.writers) > 0 {
-		writers = append(writers, options.writers...)
+		writers = append(writers, options.writers...) // 添加自定义写入器
 	}
 
 	// 处理输出路径
 	if len(options.OutputPaths) > 0 {
-		for _, path := range options.OutputPaths {
-			var w io.Writer
+		for _, path := range options.OutputPaths { // 遍历输出路径
+			var w io.Writer // 写入器
 			switch path {
 			case "stdout": // 标准输出
 				w = os.Stdout
@@ -69,7 +69,7 @@ func NewLogger(fm *FileManager, config QueueConfig, options *Options) (*logrusLo
 				}
 				w = file
 			}
-			writers = append(writers, w)
+			writers = append(writers, w) // 添加写入器
 		}
 	}
 
@@ -79,15 +79,15 @@ func NewLogger(fm *FileManager, config QueueConfig, options *Options) (*logrusLo
 	}
 
 	// 设置输出
-	l.logger.SetOutput(io.MultiWriter(writers...))
-	l.writers = writers
+	l.logger.SetOutput(io.MultiWriter(writers...)) // 设置输出
+	l.writers = writers                            // 设置写入器
 
 	// 初始化写入队列
-	queue, err := NewWriteQueue(fm, config)
+	queue, err := NewWriteQueue(fm, config) // 创建写入队列
 	if err != nil {
 		return nil, fmt.Errorf("failed to create write queue: %w", err) // 打印创建写入队列失败
 	}
-	l.writeQueue = queue
+	l.writeQueue = queue // 设置写入队列
 
 	// 配置 logrus
 	l.logger.SetLevel(convertLevel(options.Level)) // 设置日志级别
@@ -100,8 +100,8 @@ func NewLogger(fm *FileManager, config QueueConfig, options *Options) (*logrusLo
 		compressConfig := options.CompressConfig      // 压缩配置
 		compressConfig.LogPaths = options.OutputPaths // 日志路径
 
-		compressor := NewLogCompressor(compressConfig)
-		l.compressor = compressor
+		compressor := NewLogCompressor(compressConfig)                    // 创建压缩器
+		l.compressor = compressor                                         // 设置压缩器
 		compressor.Start()                                                // 启动压缩器
 		log.Printf("Compressor started with config: %+v", compressConfig) // 打印压缩器启动成功
 	}

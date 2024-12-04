@@ -58,26 +58,26 @@ func Error(err error) Field {
 // Time 创建时间类型字段
 func Time(key string, value time.Time) Field {
 	return Field{
-		Key:   key,
-		Value: value,
-		Type:  TimeType,
+		Key:   key,      // 字段名
+		Value: value,    // 字段值
+		Type:  TimeType, // 字段类型
 	}
 }
 
 // Duration 创建持续时间类型字段
 func Duration(key string, value time.Duration) Field {
 	return Field{
-		Key:   key,
-		Value: value,
-		Type:  DurationType,
+		Key:   key,          // 字段名
+		Value: value,        // 字段值
+		Type:  DurationType, // 字段类型
 	}
 }
 
 // Object 创建对象类型字段
 func Object(key string, value interface{}) Field {
 	return Field{
-		Key:   key,
-		Value: value,
-		Type:  ObjectType,
+		Key:   key,        // 字段名
+		Value: value,      // 字段值
+		Type:  ObjectType, // 字段类型
 	}
 }
