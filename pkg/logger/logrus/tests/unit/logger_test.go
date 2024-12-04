@@ -353,7 +353,7 @@ func BenchmarkFieldCreation(b *testing.B) {
 	b.Run("Concurrent String Fields", func(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				logger.String("key", "value")
+				_ = logger.String("key", "value") // 使用 _ 接收返回值
 			}
 		})
 	})
@@ -362,7 +362,7 @@ func BenchmarkFieldCreation(b *testing.B) {
 		largeString := string(make([]byte, 1024)) // 1KB string
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			logger.String("key", largeString)
+			_ = logger.String("key", largeString)
 		}
 	})
 }

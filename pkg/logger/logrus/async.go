@@ -79,15 +79,15 @@ func (w *AsyncWriter) start() {
 
 // Stop 停止异步写入
 func (w *AsyncWriter) Stop() error {
+	close(w.done) // 关闭退出通道
+	w.wg.Wait()   // 等待异步写入完成
+
 	if w.config.FlushOnExit {
 		// 先刷新数据
 		if err := w.Flush(); err != nil { // 刷新数据
 			return err
 		}
 	}
-	// 再关闭通道
-	close(w.done) // 关闭退出通道
-	w.wg.Wait()   // 等待异步写入完成
 	return nil
 }
 

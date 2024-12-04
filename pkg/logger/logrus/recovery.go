@@ -5,6 +5,7 @@ import (
 	"io"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,9 @@ type RecoveryWriter struct {
 	writer    io.Writer      // 写入器
 	config    RecoveryConfig // 配置
 	retryDone chan struct{}  // 用于通知重试完成
+	wg        sync.WaitGroup // 添加等待组
+	mu        sync.Mutex     // 添加互斥锁
+	retrying  bool           // 用于标记是否正在重试
 }
 
 // NewRecoveryWriter 创建错误恢复写入器
@@ -36,71 +40,89 @@ func NewRecoveryWriter(writer io.Writer, config RecoveryConfig) *RecoveryWriter 
 
 // Write 实现 io.Writer 接口
 func (w *RecoveryWriter) Write(p []byte) (n int, err error) {
-	if !w.config.Enable { // 如果未启用错误恢复，则直接写入
-		return w.writer.Write(p) // 直接写入
+	if !w.config.Enable {
+		return w.writer.Write(p)
 	}
 
-	// 复制数据以防后续修改
-	data := make([]byte, len(p))
-	copy(data, p) // 复制数据
-
-	// 包装首次写入，处理可能的 panic
-	var firstWriteErr error
+	// 包装首次写入以处理panic
 	func() {
 		defer func() {
-			if r := recover(); r != nil { // 捕获 panic
+			if r := recover(); r != nil {
 				if w.config.PanicHandler != nil {
-					w.config.PanicHandler(r, debug.Stack()) // 调用 panic 处理函数
+					w.config.PanicHandler(r, debug.Stack())
 				}
-				firstWriteErr = fmt.Errorf("panic in write: %v", r) // 设置错误
+				err = fmt.Errorf("panic during write: %v", r)
 			}
 		}()
-		n, firstWriteErr = w.writer.Write(data) // 写入数据
+		n, err = w.writer.Write(p)
 	}()
 
 	// 如果首次写入成功，直接返回
-	if firstWriteErr == nil {
+	if err == nil {
 		return n, nil
 	}
 
-	// 如果是 panic 导致的错误，直接返回错误
-	if strings.Contains(firstWriteErr.Error(), "panic in write") {
-		return 0, firstWriteErr
+	// 如果是panic导致的错误，不进行重试
+	if err != nil && strings.Contains(err.Error(), "panic during write") {
+		return 0, err
 	}
 
-	// 启动重试协程
+	// 准备重试数据
+	data := make([]byte, len(p))
+	copy(data, p)
+
+	w.mu.Lock()
+	w.retrying = true
+	w.mu.Unlock()
+
+	w.wg.Add(1)
 	go func() {
+		defer w.wg.Done()
 		defer func() {
-			if r := recover(); r != nil { // 捕获 panic
+			w.mu.Lock()
+			w.retrying = false
+			w.mu.Unlock()
+
+			if r := recover(); r != nil {
 				if w.config.PanicHandler != nil {
-					w.config.PanicHandler(r, debug.Stack()) // 调用 panic 处理函数
+					w.config.PanicHandler(r, debug.Stack())
 				}
 			}
-			// 无论成功失败，都通知重试完成
-			close(w.retryDone) // 通知重试完成
 		}()
 
+		// 重试写入
 		for i := 0; i < w.config.MaxRetries; i++ {
-			time.Sleep(w.config.RetryInterval)
-			if _, err := w.writer.Write(data); err == nil { // 写入数据
-				return // 如果写入成功，返回
+			if _, err := w.writer.Write(data); err == nil {
+				return
 			}
+			time.Sleep(w.config.RetryInterval)
 		}
 	}()
 
-	// 返回成功，因为重试是异步的
 	return len(p), nil
 }
 
 // WaitForRetries 等待所有重试完成
 func (w *RecoveryWriter) WaitForRetries() {
-	if w.retryDone != nil {
-		<-w.retryDone                     // 等待重试完成
-		w.retryDone = make(chan struct{}) // 重置 channel 以供下次使用
-	}
+	w.wg.Wait()
 }
 
 func (w *RecoveryWriter) CleanupRetries() {
-	// 等待所有重试完成
 	w.WaitForRetries()
+}
+
+// 实现 io.Closer 接口
+func (w *RecoveryWriter) Close() error {
+	w.mu.Lock()
+	if w.retrying { // 如果正在重试
+		w.mu.Unlock()
+		w.WaitForRetries() // 等待重试完成
+		return nil
+	}
+	w.mu.Unlock()
+
+	if closer, ok := w.writer.(io.Closer); ok { // 如果writer实现了io.Closer接口
+		return closer.Close() // 关闭writer
+	}
+	return nil
 }
