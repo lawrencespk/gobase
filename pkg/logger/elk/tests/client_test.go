@@ -51,11 +51,13 @@ type MockClient struct {
 	mock.Mock
 }
 
+// IndexExists 实现 ClientInterface 接口
 func (m *MockClient) IndexExists(indices ...string) elk.IndicesExistsServiceInterface {
 	args := m.Called(indices)
 	return args.Get(0).(elk.IndicesExistsServiceInterface)
 }
 
+// CreateIndex 实现 ClientInterface 接口
 func (m *MockClient) CreateIndex(name string) elk.IndicesCreateServiceInterface {
 	args := m.Called(name)
 	return args.Get(0).(elk.IndicesCreateServiceInterface)
@@ -67,6 +69,7 @@ func (m *MockClient) BulkProcessor() *elastic.BulkProcessorService {
 	return args.Get(0).(*elastic.BulkProcessorService)
 }
 
+// TestCreateIndex 测试创建索引
 func TestCreateIndex(t *testing.T) {
 	mockClient := new(MockClient)
 	elkClient := elk.NewTestElkClient(mockClient)
@@ -109,6 +112,7 @@ func TestCreateIndex(t *testing.T) {
 	mockCreateService.AssertExpectations(t)
 }
 
+// TestCreateIndexWhenIndexExists 测试当索引存在时创建索引
 func TestCreateIndexWhenIndexExists(t *testing.T) {
 	mockClient := new(MockClient)
 	elkClient := elk.NewTestElkClient(mockClient)
