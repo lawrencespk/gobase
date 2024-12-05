@@ -1,221 +1,291 @@
 package elk
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"gobase/pkg/config"
 	"gobase/pkg/errors"
-
-	"github.com/elastic/go-elasticsearch/v8/esapi"
+	"gobase/pkg/errors/codes"
 )
 
-// BulkProcessor 处理批量操作
-type BulkProcessor struct {
-	client      *ElkClient
-	buffer      *bytes.Buffer
-	bufferMutex sync.Mutex
-	batchSize   int           // 批量大小
-	flushBytes  int           // 刷新字节数阈值
-	flushTimer  *time.Timer   // 定时刷新计时器
-	interval    time.Duration // 刷新间隔
+// 错误定义
+var (
+	ErrProcessorClosed  = errors.NewError(codes.ELKBulkError, "bulk processor is closed", nil)
+	ErrDocumentTooLarge = errors.NewError(codes.ELKBulkError, "document size exceeds flush bytes limit", nil)
+	ErrRetryExhausted   = errors.NewError(codes.ELKBulkError, "retry attempts exhausted", nil)
+	ErrCloseTimeout     = errors.NewError(codes.ELKTimeoutError, "close operation timed out", nil)
+)
+
+// BulkStats 统计信息
+type BulkStats struct {
+	TotalDocuments int64     // 处理的总文档数
+	TotalBytes     int64     // 处理的总字节数
+	FlushCount     int64     // 刷新次数
+	ErrorCount     int64     // 错误次数
+	LastError      error     // 最后一次错误
+	LastFlushTime  time.Time // 最后一次刷新时间
 }
 
-// BulkProcessorConfig 批量处理器配置
+// BulkProcessor 处理批量操作的接口
+type BulkProcessor interface {
+	Add(ctx context.Context, index string, doc interface{}) error
+	Flush(ctx context.Context) error
+	Close() error
+	Stats() *BulkStats // 新增：获取统计信息
+}
+
+// BulkProcessorConfig 批量处理器的配置
 type BulkProcessorConfig struct {
-	BatchSize  int           // 批量大小
-	FlushBytes int           // 刷新字节数阈值
-	Interval   time.Duration // 刷新间隔
+	BatchSize    int           // 触发刷新的文档数量
+	FlushBytes   int64         // 触发刷新的字节数
+	Interval     time.Duration // 自动刷新的时间间隔
+	DefaultIndex string        // 默认索引名称
+	RetryCount   int           // 新增：重试次数
+	RetryWait    time.Duration // 新增：重试等待时间
+	CloseTimeout time.Duration // 新增：关闭超时时间
 }
 
-// DefaultBulkProcessorConfig 返回默认配置
-func DefaultBulkProcessorConfig() *BulkProcessorConfig {
-	conf := config.GetConfig()
-	if conf == nil {
-		return &BulkProcessorConfig{
-			BatchSize:  1000,
-			FlushBytes: 5 * 1024 * 1024,
-			Interval:   30 * time.Second,
-		}
-	}
+// indexedDocument 包装文档和其目标索引
+type indexedDocument struct {
+	index string
+	doc   interface{}
+}
 
-	interval, err := time.ParseDuration(conf.ELK.Bulk.Interval)
+// bulkProcessor 实现 BulkProcessor 接口
+type bulkProcessor struct {
+	client    Client
+	config    *BulkProcessorConfig
+	documents []indexedDocument
+	bytesSize int64
+	mu        sync.Mutex
+	closed    bool
+	flushChan chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once // 新增：确保只关闭一次
+
+	// 统计信息，使用原子操作
+	totalDocs  atomic.Int64
+	totalBytes atomic.Int64
+	flushCount atomic.Int64
+	errorCount atomic.Int64
+	lastError  error
+	lastFlush  atomic.Value // 存储 time.Time
+}
+
+// calculateDocumentSize 计算文档的字节大小
+func calculateDocumentSize(doc interface{}) (int64, error) {
+	data, err := json.Marshal(doc)
 	if err != nil {
-		interval = 30 * time.Second
+		return 0, errors.Wrap(err, "failed to marshal document")
 	}
-
-	return &BulkProcessorConfig{
-		BatchSize:  conf.ELK.Bulk.BatchSize,
-		FlushBytes: conf.ELK.Bulk.FlushBytes,
-		Interval:   interval,
-	}
+	return int64(len(data)), nil
 }
 
 // NewBulkProcessor 创建新的批量处理器
-func NewBulkProcessor(client *ElkClient, config *BulkProcessorConfig) *BulkProcessor {
-	if config == nil {
-		config = DefaultBulkProcessorConfig()
+func NewBulkProcessor(client Client, config *BulkProcessorConfig) BulkProcessor {
+	if config.DefaultIndex == "" {
+		config.DefaultIndex = "default"
+	}
+	if config.RetryCount <= 0 {
+		config.RetryCount = 3 // 默认重试3次
+	}
+	if config.RetryWait <= 0 {
+		config.RetryWait = time.Second // 默认等待1秒
+	}
+	if config.CloseTimeout <= 0 {
+		config.CloseTimeout = 30 * time.Second // 默认30秒超时
 	}
 
-	b := &BulkProcessor{
-		client:     client,
-		buffer:     &bytes.Buffer{},
-		batchSize:  config.BatchSize,
-		flushBytes: config.FlushBytes,
-		interval:   config.Interval,
+	bp := &bulkProcessor{
+		client:    client,
+		config:    config,
+		documents: make([]indexedDocument, 0, config.BatchSize),
+		bytesSize: 0,
+		flushChan: make(chan struct{}, 1),
+		done:      make(chan struct{}),
 	}
 
-	// 启动定时刷新
-	b.startTimer()
+	// 初始化最后刷新时间
+	bp.lastFlush.Store(time.Now())
 
-	return b
+	go bp.flushRoutine()
+	return bp
 }
 
-// Add 添加文档到批量操作
-func (b *BulkProcessor) Add(ctx context.Context, index string, document interface{}) error {
-	if !b.client.isConnected {
-		return errors.NewELKConnectionError("client is not connected", nil)
-	}
-
-	// 构建批量操作元数据
-	meta := map[string]interface{}{
-		"index": map[string]interface{}{
-			"_index": index,
-		},
-	}
-
-	// 序列化元数据和文档
-	metaBytes, err := json.Marshal(meta)
-	if err != nil {
-		return errors.NewELKBulkError("failed to marshal metadata", err)
-	}
-
-	docBytes, err := json.Marshal(document)
-	if err != nil {
-		return errors.NewELKBulkError("failed to marshal document", err)
-	}
-
-	b.bufferMutex.Lock()
-	defer b.bufferMutex.Unlock()
-
-	// 写入批量操作格式
-	b.buffer.Write(metaBytes)
-	b.buffer.WriteString("\n")
-	b.buffer.Write(docBytes)
-	b.buffer.WriteString("\n")
-
-	// 检查是否需要刷新
-	if b.buffer.Len() >= b.flushBytes {
-		return b.Flush(ctx)
-	}
-
-	return nil
-}
-
-// Flush 刷新批量操作
-func (b *BulkProcessor) Flush(ctx context.Context) error {
-	b.bufferMutex.Lock()
-	defer b.bufferMutex.Unlock()
-
-	if b.buffer.Len() == 0 {
-		return nil
-	}
-
-	req := esapi.BulkRequest{
-		Body: bytes.NewReader(b.buffer.Bytes()),
-	}
-
-	res, err := req.Do(ctx, b.client.client)
-	if err != nil {
-		return errors.NewELKBulkError("failed to execute bulk operation", err)
-	}
-	defer res.Body.Close()
-
-	if res.IsError() {
-		return errors.NewELKBulkError(
-			"bulk operation failed: "+res.String(),
-			nil,
-		)
-	}
-
-	// 解析响应
-	var bulkResponse struct {
-		Errors bool `json:"errors"`
-		Items  []struct {
-			Index struct {
-				Status int    `json:"status"`
-				Error  string `json:"error,omitempty"`
-			} `json:"index"`
-		} `json:"items"`
-	}
-
-	if err := json.NewDecoder(res.Body).Decode(&bulkResponse); err != nil {
-		return errors.NewELKBulkError("failed to decode bulk response", err)
-	}
-
-	// 检查是否有错误
-	if bulkResponse.Errors {
-		// 这里可以添加更详细的错误处理逻辑
-		return errors.NewELKBulkError("some documents failed to index", nil)
-	}
-
-	// 清空缓冲区
-	b.buffer.Reset()
-
-	return nil
-}
-
-// Close 关闭批量处理器
-func (b *BulkProcessor) Close() error {
-	if b.flushTimer != nil {
-		b.flushTimer.Stop()
-	}
-
-	// 尝试最后一次刷新
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	return b.Flush(ctx)
-}
-
-// startTimer 启动定时刷新
-func (b *BulkProcessor) startTimer() {
-	b.flushTimer = time.NewTimer(b.interval)
-	go func() {
-		for range b.flushTimer.C {
-			ctx := context.Background()
-			if err := b.Flush(ctx); err != nil {
-				// 处理错误
-				switch {
-				case errors.Is(err, errors.NewELKConnectionError("", nil)):
-					// 连接错误，可能需要重试
-					if log != nil {
-						log.Error(errors.Wrap(err, "ELK bulk processor connection error, retrying"))
-					}
-					time.Sleep(time.Second)
-
-				case errors.Is(err, errors.NewELKBulkError("", nil)):
-					// 批量操作错误
-					if log != nil {
-						log.Error(errors.Wrap(err, "ELK bulk operation failed"))
-					}
-
-				default:
-					// 其他错误
-					if log != nil {
-						log.Error(errors.Wrap(err, "Unknown error during ELK bulk flush"))
+// withRetry 包装需要重试的操作
+func (bp *bulkProcessor) withRetry(ctx context.Context, operation func(context.Context) error) error {
+	var lastErr error
+	for attempt := 0; attempt <= bp.config.RetryCount; attempt++ {
+		select {
+		case <-ctx.Done():
+			return errors.Wrap(ctx.Err(), "context cancelled during retry")
+		default:
+			if err := operation(ctx); err == nil {
+				return nil
+			} else {
+				lastErr = errors.Wrap(err, "operation failed during retry")
+				if attempt < bp.config.RetryCount {
+					waitTime := bp.config.RetryWait * time.Duration(attempt+1)
+					select {
+					case <-ctx.Done():
+						return errors.Wrap(ctx.Err(), "context cancelled during retry wait")
+					case <-time.After(waitTime):
+						continue
 					}
 				}
 			}
-			b.flushTimer.Reset(b.interval)
 		}
-	}()
+	}
+	return errors.Wrap(lastErr, ErrRetryExhausted.Error())
 }
 
-// SetLogger 设置日志实例
-func SetLogger(logger Logger) {
-	log = logger
+func (bp *bulkProcessor) Add(ctx context.Context, index string, doc interface{}) error {
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+
+	if bp.closed {
+		return ErrProcessorClosed
+	}
+
+	docSize, err := calculateDocumentSize(doc)
+	if err != nil {
+		return err
+	}
+
+	if docSize > bp.config.FlushBytes {
+		if err := bp.flushLocked(ctx); err != nil {
+			return err
+		}
+	}
+
+	bp.documents = append(bp.documents, indexedDocument{index: index, doc: doc})
+	bp.bytesSize += docSize
+	bp.totalDocs.Add(1)
+	bp.totalBytes.Add(docSize)
+
+	if len(bp.documents) >= bp.config.BatchSize || bp.bytesSize >= bp.config.FlushBytes {
+		return bp.flushLocked(ctx)
+	}
+
+	return nil
+}
+
+func (bp *bulkProcessor) Flush(ctx context.Context) error {
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+	return bp.flushLocked(ctx)
+}
+
+func (bp *bulkProcessor) flushLocked(ctx context.Context) error {
+	if len(bp.documents) == 0 {
+		return nil
+	}
+
+	indexedDocs := make(map[string][]interface{})
+	for _, idoc := range bp.documents {
+		indexedDocs[idoc.index] = append(indexedDocs[idoc.index], idoc.doc)
+	}
+
+	err := bp.withRetry(ctx, func(ctx context.Context) error {
+		for index, docs := range indexedDocs {
+			if err := bp.client.BulkIndexDocuments(ctx, index, docs); err != nil {
+				bp.errorCount.Add(1)
+				bp.lastError = err
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		// 记录错误但不返回，让处理器继续工作
+		bp.errorCount.Add(1)
+		bp.lastError = err
+		// 清空文档列表，防止重复处理失败的文档
+		bp.documents = bp.documents[:0]
+		bp.bytesSize = 0
+		return nil
+	}
+
+	bp.documents = bp.documents[:0]
+	bp.bytesSize = 0
+	bp.flushCount.Add(1)
+	bp.lastFlush.Store(time.Now())
+	return nil
+}
+
+func (bp *bulkProcessor) Close() error {
+	var closeErr error
+	bp.closeOnce.Do(func() {
+		bp.mu.Lock()
+		if bp.closed {
+			bp.mu.Unlock()
+			return
+		}
+		bp.closed = true
+		bp.mu.Unlock()
+
+		// 执行优雅关闭
+		closeErr = bp.gracefulClose(context.Background())
+	})
+	return closeErr
+}
+
+// gracefulClose 优雅关闭处理
+func (bp *bulkProcessor) gracefulClose(ctx context.Context) error {
+	closeCtx, cancel := context.WithTimeout(ctx, bp.config.CloseTimeout)
+	defer cancel()
+
+	close(bp.done)
+
+	doneChan := make(chan error, 1)
+	go func() {
+		bp.mu.Lock()
+		defer bp.mu.Unlock()
+		doneChan <- bp.flushLocked(closeCtx)
+	}()
+
+	select {
+	case err := <-doneChan:
+		return errors.Wrap(err, "error during graceful shutdown")
+	case <-closeCtx.Done():
+		if closeCtx.Err() == context.DeadlineExceeded {
+			return ErrCloseTimeout
+		}
+		return errors.Wrap(closeCtx.Err(), "context cancelled during graceful shutdown")
+	}
+}
+
+func (bp *bulkProcessor) flushRoutine() {
+	ticker := time.NewTicker(bp.config.Interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), bp.config.CloseTimeout)
+			if err := bp.Flush(ctx); err != nil {
+				bp.errorCount.Add(1)
+				bp.lastError = errors.Wrap(err, "failed to flush in background routine")
+			}
+			cancel()
+		case <-bp.done:
+			return
+		}
+	}
+}
+
+// Stats 返回当前统计信息的快照
+func (bp *bulkProcessor) Stats() *BulkStats {
+	return &BulkStats{
+		TotalDocuments: bp.totalDocs.Load(),
+		TotalBytes:     bp.totalBytes.Load(),
+		FlushCount:     bp.flushCount.Load(),
+		ErrorCount:     bp.errorCount.Load(),
+		LastError:      bp.lastError,
+		LastFlushTime:  bp.lastFlush.Load().(time.Time),
+	}
 }

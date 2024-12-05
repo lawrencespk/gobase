@@ -6,6 +6,3 @@ type Logger interface {
 	Info(msg string)
 	Debug(msg string)
 }
-
-// 全局日志实例
-var log Logger

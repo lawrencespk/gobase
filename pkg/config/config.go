@@ -1,6 +1,8 @@
 package config
 
 import (
+	"sync"
+
 	"github.com/spf13/viper"
 )
 
@@ -100,7 +102,10 @@ type QueueConfig struct {
 	ShutdownTimeout string `mapstructure:"shutdownTimeout"`
 }
 
-var globalConfig *Config
+var (
+	globalConfig *Config
+	configMu     sync.RWMutex
+)
 
 func Init() error {
 	viper.SetConfigName("config")
@@ -121,5 +126,13 @@ func Init() error {
 }
 
 func GetConfig() *Config {
+	configMu.RLock()
+	defer configMu.RUnlock()
 	return globalConfig
+}
+
+func SetConfig(cfg *Config) {
+	configMu.Lock()
+	globalConfig = cfg
+	configMu.Unlock()
 }

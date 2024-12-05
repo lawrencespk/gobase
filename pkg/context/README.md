@@ -5,7 +5,7 @@ Context 模块是一个基于 Go 标准库 `context.Context` 的扩展实现，�
 
 ## 目录结构
 
-```
+```go
 pkg/context/
 ├── types/ # 类型定义
 │ ├── context.go # Context 接口定义
@@ -30,9 +30,7 @@ pkg/context/
 
 ### 2. 预定义常量
 
-```
-go
-
+```go
 const (
 KeyUserID = "user_id" // 用户ID
 KeyUserName = "user_name" // 用户名
@@ -48,18 +46,14 @@ KeyError = "error" // 错误信息
 
 ### 创建上下文
 
-```
-go
-
+```go
 // 创建新的上下文
 ctx := context.NewContext(context.Background())
 ```
 
 ### 元数据操作
 
-```
-go
-
+```go
 // 设置单个元数据
 ctx.SetMetadata("key", value)
 // 获取单个元数据
@@ -77,9 +71,7 @@ ctx.SetMetadataMap(data)
 ```
 
 ### 用户信息管理
-```
-go
-
+```go
 // 设置用户信息
 ctx.SetUserID("user-123")
 ctx.SetUserName("John Doe")
@@ -89,10 +81,8 @@ userName := ctx.GetUserName()
 ```
 
 ### 请求信息管理
-```
-go
-
-/ 设置请求信息
+```go
+// 设置请求信息
 ctx.SetRequestID("req-123")
 ctx.SetClientIP("192.168.1.1")
 // 获取请求信息
@@ -101,9 +91,7 @@ clientIP := ctx.GetClientIP()
 ```
 
 ### 追踪信息管理
-```
-go
-
+```go
 // 设置追踪信息
 ctx.SetTraceID("trace-123")
 ctx.SetSpanID("span-456")
@@ -113,9 +101,7 @@ spanID := ctx.GetSpanID()
 ```
 
 ### 错误处理
-```
-go
-
+```go
 // 设置错误
 ctx.SetError(errors.New("some error"))
 // 获取错误
@@ -127,9 +113,7 @@ ctx.SetError(nil)
 ```
 
 ### 上下文控制
-```
-go
-
+```go
 // 设置超时
 timeoutCtx, cancel := ctx.WithTimeout(5 time.Second)
 defer cancel()
@@ -145,9 +129,7 @@ clonedCtx := ctx.Clone()
 ```
 
 ### 类型转换工具
-```
-go
-
+```go
 // 获取字符串值
 strVal, ok := GetStringValue(ctx, "string-key")
 // 获取整数值
@@ -161,9 +143,7 @@ timeVal, ok := GetTimeValue(ctx, "time-key")
 ```
 
 ### 验证器
-```
-go
-
+```go
 // 预定义的验证规则集
 var (
 RequiredUserContext = []string{types.KeyUserID, types.KeyUserName}
@@ -179,9 +159,7 @@ err := ValidateTraceContext(ctx)
 ```
 
 ### Gin 框架集成
-```
-go
-
+```go
 // 注册中间件
 r := gin.New()
 r.Use(ctxMiddleware.Middleware())

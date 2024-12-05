@@ -9,4 +9,9 @@ type ElkClientInterface interface {
 	BulkIndexDocuments(ctx context.Context, index string, documents []interface{}) error
 	Query(ctx context.Context, index string, query interface{}) (interface{}, error)
 	Close() error
+
+	CreateIndex(ctx context.Context, index string, mapping *IndexMapping) error
+	DeleteIndex(ctx context.Context, index string) error
+	IndexExists(ctx context.Context, index string) (bool, error)
+	GetIndexMapping(ctx context.Context, index string) (*IndexMapping, error)
 }

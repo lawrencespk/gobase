@@ -1,60 +1,18 @@
 package unit
 
 import (
-	"context"
-	"errors"
 	"testing"
 
-	"gobase/pkg/logger/elk"
+	"gobase/pkg/logger/elk/tests/mock"
 	"gobase/pkg/logger/logrus"
 
 	slogrus "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 )
 
-// 创建一个模拟的 ElkClient
-type mockElkClient struct {
-	shouldError bool
-}
-
-func (m *mockElkClient) Connect(config *elk.ElkConfig) error {
-	return nil
-}
-
-func (m *mockElkClient) Close() error {
-	return nil
-}
-
-func (m *mockElkClient) IndexDocument(ctx context.Context, index string, document interface{}) error {
-	if m.shouldError {
-		return errors.New("mock error")
-	}
-	return nil
-}
-
-// 添加缺少的方法
-func (m *mockElkClient) BulkIndexDocuments(ctx context.Context, index string, documents []interface{}) error {
-	if m.shouldError {
-		return errors.New("mock error")
-	}
-	return nil
-}
-
-func (m *mockElkClient) Query(ctx context.Context, index string, query interface{}) (interface{}, error) {
-	if m.shouldError {
-		return nil, errors.New("mock error")
-	}
-	return nil, nil
-}
-
-func (m *mockElkClient) IsConnected() bool {
-	return true
-}
-
 // TestNewHook 测试Hook的创建
 func TestNewHook(t *testing.T) {
-	// 使用模拟的客户端
-	mockClient := &mockElkClient{}
+	mockClient := mock.NewMockElkClient()
 	hook := logrus.NewHookWithClient(mockClient)
 	assert.NotNil(t, hook)
 }
@@ -85,10 +43,10 @@ func TestHookLevels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClient := &mockElkClient{}
+			mockClient := mock.NewMockElkClient()
 			h := logrus.NewHookWithClient(mockClient)
 
-			// 假设我们在 Hook 中有一个方法可以设置期望的级别
+			// 假设我们在 Hook 中有一个��法可以设置期望的级别
 			h.SetLevels(tt.levels) // 需要在 Hook 中实现这个方法
 
 			levels := h.Levels()
@@ -103,7 +61,7 @@ func TestHookLevels(t *testing.T) {
 
 // TestHookFire 测试Hook的Fire方法
 func TestHookFire(t *testing.T) {
-	mockClient := &mockElkClient{}
+	mockClient := mock.NewMockElkClient()
 	h := logrus.NewHookWithClient(mockClient)
 
 	entry := &slogrus.Entry{
@@ -118,7 +76,7 @@ func TestHookFire(t *testing.T) {
 
 // TestHookFireWithFields 测试带字段的Hook Fire
 func TestHookFireWithFields(t *testing.T) {
-	mockClient := &mockElkClient{}
+	mockClient := mock.NewMockElkClient()
 	h := logrus.NewHookWithClient(mockClient)
 
 	entry := &slogrus.Entry{
@@ -136,9 +94,9 @@ func TestHookFireWithFields(t *testing.T) {
 
 // TestHookFireError 测试Hook Fire的错误处理
 func TestHookFireError(t *testing.T) {
-	// 创建一个总是返回错误的模拟客户端
-	errorClient := &mockElkClient{shouldError: true}
-	h := logrus.NewHookWithClient(errorClient)
+	mockClient := mock.NewMockElkClient()
+	mockClient.SetShouldFailOps(true)
+	h := logrus.NewHookWithClient(mockClient)
 
 	entry := &slogrus.Entry{
 		Logger:  slogrus.New(),
@@ -148,4 +106,31 @@ func TestHookFireError(t *testing.T) {
 
 	err := h.Fire(entry)
 	assert.Error(t, err)
+}
+
+// TestHook 测试完整的Hook功能
+func TestHook(t *testing.T) {
+	mockClient := mock.NewMockElkClient()
+	hook := logrus.NewHookWithClient(mockClient)
+
+	// 测试Hook基本属性
+	assert.NotNil(t, hook)
+	assert.NotEmpty(t, hook.Levels())
+
+	// 测试Fire功能
+	entry := &slogrus.Entry{
+		Logger:  slogrus.New(),
+		Level:   slogrus.InfoLevel,
+		Message: "test complete hook functionality",
+		Data: slogrus.Fields{
+			"test_key": "test_value",
+		},
+	}
+
+	err := hook.Fire(entry)
+	assert.NoError(t, err)
+
+	// 验证文档是否被正确索引
+	docs := mockClient.GetDocuments()
+	assert.NotEmpty(t, docs)
 }

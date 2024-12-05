@@ -23,6 +23,12 @@ type Client interface {
 	BulkIndexDocuments(ctx context.Context, index string, documents []interface{}) error
 	Query(ctx context.Context, index string, query interface{}) (interface{}, error)
 	IsConnected() bool
+
+	// 索引管理方法（实现在 index.go 中）
+	CreateIndex(ctx context.Context, index string, mapping *IndexMapping) error
+	DeleteIndex(ctx context.Context, index string) error
+	IndexExists(ctx context.Context, index string) (bool, error)
+	GetIndexMapping(ctx context.Context, index string) (*IndexMapping, error)
 }
 
 // ElkClient 实现 Client 接口
@@ -39,44 +45,43 @@ func NewElkClient() *ElkClient {
 	}
 }
 
-// Connect 连接到 Elasticsearch
-func (c *ElkClient) Connect(config *ElkConfig) error {
-	if c.isConnected {
-		return nil
+// Connect 连接到 Elasticsearch 服务器
+func (c *ElkClient) Connect(cfg *ElkConfig) error {
+	if err := c.validateConfig(cfg); err != nil {
+		return err
 	}
 
-	if err := c.validateConfig(config); err != nil {
-		return errors.NewELKConfigError("invalid configuration", err)
-	}
-
-	cfg := elasticsearch.Config{
-		Addresses: config.Addresses,
-		Username:  config.Username,
-		Password:  config.Password,
+	c.config = cfg
+	// cfg := elasticsearch.Config{
+	// 	Addresses: config.Addresses,
+	// 	Username:  config.Username,
+	// 	Password:  config.Password,
+	//
+	esCfg := elasticsearch.Config{
+		Addresses: cfg.Addresses,
+		Username:  cfg.Username,
+		Password:  cfg.Password,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, // 在生产环境中应该设置为 false
+				InsecureSkipVerify: true,
 			},
 		},
-		RetryOnStatus: []int{502, 503, 504}, // 在这些状态码下重试
+		RetryOnStatus: []int{502, 503, 504},
 		MaxRetries:    3,
 		RetryBackoff: func(i int) time.Duration {
-			// 实现指数退避
 			return time.Duration(i) * time.Second
 		},
 		RetryOnError: func(req *http.Request, err error) bool {
-			// 判断是否需要重试
-			return err != nil // 简单起见，这里对所有错误都重试
+			return err != nil
 		},
 	}
-
-	client, err := elasticsearch.NewClient(cfg)
+	//client, err := elasticsearch.NewClient(cfg)
+	client, err := elasticsearch.NewClient(esCfg)
 	if err != nil {
 		return errors.NewELKConnectionError("failed to create elasticsearch client", err)
 	}
 
-	// 测试连接
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.Timeout)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Timeout)*time.Second)
 	defer cancel()
 
 	_, err = client.Info(client.Info.WithContext(ctx))
@@ -85,7 +90,8 @@ func (c *ElkClient) Connect(config *ElkConfig) error {
 	}
 
 	c.client = client
-	c.config = config
+	//c.config = config
+	c.config = cfg
 	c.isConnected = true
 
 	return nil
@@ -114,21 +120,18 @@ func (c *ElkClient) IndexDocument(ctx context.Context, index string, document in
 		return errors.NewELKConnectionError("client is not connected", nil)
 	}
 
-	// 序列化文档
 	payload, err := json.Marshal(document)
 	if err != nil {
 		return errors.NewELKIndexError("failed to marshal document", err)
 	}
 
-	// 创建索引请求
 	req := esapi.IndexRequest{
 		Index:      index,
 		Body:       bytes.NewReader(payload),
-		Refresh:    "false",            // 不立即刷新
-		FilterPath: []string{"result"}, // 只返回结果状态
+		Refresh:    "false",
+		FilterPath: []string{"result"},
 	}
 
-	// 执行请求
 	res, err := req.Do(ctx, c.client)
 	if err != nil {
 		return errors.NewELKIndexError("failed to execute index request", err)
@@ -157,34 +160,28 @@ func (c *ElkClient) BulkIndexDocuments(ctx context.Context, index string, docume
 
 	var buf bytes.Buffer
 
-	// 构建批量请求
 	for _, doc := range documents {
-		// 添加操作元数据
 		meta := map[string]interface{}{
 			"index": map[string]interface{}{
 				"_index": index,
 			},
 		}
 
-		// 序列化元数据
 		if err := json.NewEncoder(&buf).Encode(meta); err != nil {
 			return errors.NewELKBulkError("failed to encode metadata", err)
 		}
 
-		// 序列化文档
 		if err := json.NewEncoder(&buf).Encode(doc); err != nil {
 			return errors.NewELKBulkError("failed to encode document", err)
 		}
 	}
 
-	// 创建批量请求
 	req := esapi.BulkRequest{
 		Body:       bytes.NewReader(buf.Bytes()),
 		Refresh:    "false",
 		FilterPath: []string{"errors", "items.*.error"},
 	}
 
-	// 执行请求
 	res, err := req.Do(ctx, c.client)
 	if err != nil {
 		return errors.NewELKBulkError("failed to execute bulk request", err)
@@ -198,13 +195,11 @@ func (c *ElkClient) BulkIndexDocuments(ctx context.Context, index string, docume
 		)
 	}
 
-	// 解析响应
 	var raw map[string]interface{}
 	if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
 		return errors.NewELKBulkError("failed to parse bulk response", err)
 	}
 
-	// 检查是否有错误
 	if raw["errors"].(bool) {
 		return errors.NewELKBulkError("some documents failed to index", nil)
 	}
@@ -218,19 +213,16 @@ func (c *ElkClient) Query(ctx context.Context, index string, query interface{}) 
 		return nil, errors.NewELKConnectionError("client is not connected", nil)
 	}
 
-	// 序列化查询
 	payload, err := json.Marshal(query)
 	if err != nil {
 		return nil, errors.NewELKQueryError("failed to marshal query", err)
 	}
 
-	// 创建搜索请求
 	req := esapi.SearchRequest{
 		Index: []string{index},
 		Body:  bytes.NewReader(payload),
 	}
 
-	// 执行请求
 	res, err := req.Do(ctx, c.client)
 	if err != nil {
 		return nil, errors.NewELKQueryError("failed to execute search request", err)
@@ -244,7 +236,6 @@ func (c *ElkClient) Query(ctx context.Context, index string, query interface{}) 
 		)
 	}
 
-	// 解析响应
 	var result map[string]interface{}
 	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
 		return nil, errors.NewELKQueryError("failed to parse search response", err)
@@ -259,7 +250,6 @@ func (c *ElkClient) Close() error {
 		return nil
 	}
 
-	// API 客户端没有显式的关闭方法，但我们可以清理资源
 	c.client = nil
 	c.config = nil
 	c.isConnected = false
