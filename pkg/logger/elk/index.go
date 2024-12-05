@@ -42,47 +42,6 @@ func DefaultIndexMapping() *IndexMapping {
 	}
 }
 
-// CreateIndex 创建索引
-func (c *ElkClient) CreateIndex(ctx context.Context, index string, mapping *IndexMapping) error {
-	if !c.isConnected {
-		return errors.NewELKConnectionError("client is not connected", nil)
-	}
-
-	if strings.TrimSpace(index) == "" {
-		return errors.NewELKIndexError("index name cannot be empty", nil)
-	}
-
-	// 如果没有提供映射，使用默认映射
-	if mapping == nil {
-		mapping = DefaultIndexMapping()
-	}
-
-	body, err := json.Marshal(mapping)
-	if err != nil {
-		return errors.NewELKIndexError("failed to marshal index mapping", err)
-	}
-
-	req := esapi.IndicesCreateRequest{
-		Index: index,
-		Body:  strings.NewReader(string(body)),
-	}
-
-	res, err := req.Do(ctx, c.client)
-	if err != nil {
-		return errors.NewELKIndexError("failed to create index", err)
-	}
-	defer res.Body.Close()
-
-	if res.IsError() {
-		return errors.NewELKIndexError(
-			"failed to create index: "+res.String(),
-			nil,
-		)
-	}
-
-	return nil
-}
-
 // DeleteIndex 删除索引
 func (c *ElkClient) DeleteIndex(ctx context.Context, index string) error {
 	if !c.isConnected {

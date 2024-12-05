@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"gobase/pkg/errors"
 
 	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/elastic/go-elasticsearch/v8/esapi"
+	"github.com/elastic/go-elasticsearch/v8/esutil"
 )
 
 // Client 定义了 ElkClient 的接口
@@ -29,6 +31,8 @@ type Client interface {
 	DeleteIndex(ctx context.Context, index string) error
 	IndexExists(ctx context.Context, index string) (bool, error)
 	GetIndexMapping(ctx context.Context, index string) (*IndexMapping, error)
+	CreateIndexTemplate(ctx context.Context, templateName string, template map[string]interface{}) error
+	DeleteIndexTemplate(ctx context.Context, templateName string) error
 }
 
 // ElkClient 实现 Client 接口
@@ -260,4 +264,132 @@ func (c *ElkClient) Close() error {
 // IsConnected 检查客户端是否已连接
 func (c *ElkClient) IsConnected() bool {
 	return c.isConnected
+}
+
+// CreateIndexTemplate 创建索引模板
+func (c *ElkClient) CreateIndexTemplate(ctx context.Context, templateName string, template map[string]interface{}) error {
+	if !c.isConnected {
+		return errors.NewELKConnectionError("client is not connected", nil)
+	}
+
+	req := esapi.IndicesPutTemplateRequest{
+		Name: templateName,
+		Body: esutil.NewJSONReader(template),
+	}
+
+	res, err := req.Do(ctx, c.client)
+	if err != nil {
+		return errors.NewELKIndexError("failed to create index template", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return errors.NewELKIndexError("failed to create index template: "+res.String(), nil)
+	}
+
+	return nil
+}
+
+// DeleteIndexTemplate 删除索引模板
+func (c *ElkClient) DeleteIndexTemplate(ctx context.Context, templateName string) error {
+	if !c.isConnected {
+		return errors.NewELKConnectionError("client is not connected", nil)
+	}
+
+	req := esapi.IndicesDeleteTemplateRequest{
+		Name: templateName,
+	}
+
+	res, err := req.Do(ctx, c.client)
+	if err != nil {
+		return errors.NewELKIndexError("failed to delete index template", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return errors.NewELKIndexError("failed to delete index template: "+res.String(), nil)
+	}
+
+	return nil
+}
+
+// 添加新的方法到 ElkClient
+func (c *ElkClient) HealthCheck(ctx context.Context) error {
+	resp, err := c.client.Cluster.Health(
+		c.client.Cluster.Health.WithContext(ctx),
+	)
+	if err != nil {
+		return fmt.Errorf("health check failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.IsError() {
+		return fmt.Errorf("health check response error: %s", resp.String())
+	}
+
+	return nil
+}
+
+func (c *ElkClient) CreateIndex(ctx context.Context, indexName string, mapping *IndexMapping) error {
+	body, err := json.Marshal(mapping)
+	if err != nil {
+		return fmt.Errorf("failed to marshal index mapping: %w", err)
+	}
+
+	resp, err := c.client.Indices.Create(
+		indexName,
+		c.client.Indices.Create.WithBody(strings.NewReader(string(body))),
+		c.client.Indices.Create.WithContext(ctx),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create index: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.IsError() {
+		return fmt.Errorf("index creation response error: %s", resp.String())
+	}
+
+	return nil
+}
+
+// RefreshIndex 刷新指定的索引
+func (c *ElkClient) RefreshIndex(ctx context.Context, index string) error {
+	req := esapi.IndicesRefreshRequest{
+		Index: []string{index},
+	}
+	res, err := req.Do(ctx, c.client)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return fmt.Errorf("刷新索引失败: %s", res.String())
+	}
+	return nil
+}
+
+// GetIndexStats 获取索引的统计信息
+func (c *ElkClient) GetIndexStats(ctx context.Context, index string) (map[string]interface{}, error) {
+	req := esapi.IndicesStatsRequest{
+		Index: []string{index},
+	}
+
+	res, err := req.Do(ctx, c.client)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return nil, fmt.Errorf("获取索引统计失败: %s", res.String())
+	}
+
+	var stats map[string]interface{}
+	if err := json.NewDecoder(res.Body).Decode(&stats); err != nil {
+		return nil, fmt.Errorf("解析统计信息失败: %w", err)
+	}
+
+	return stats, nil
 }

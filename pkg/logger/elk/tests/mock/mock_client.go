@@ -185,5 +185,31 @@ func (m *mockElkClient) GetIndexMapping(ctx context.Context, index string) (*elk
 	return mapping, nil
 }
 
+// CreateIndexTemplate 实现模拟的创建索引模板方法
+func (m *mockElkClient) CreateIndexTemplate(ctx context.Context, templateName string, template map[string]interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.shouldFailOps {
+		return errors.New("mock create index template failure")
+	}
+
+	// 可以在这里添加模拟的模板存储逻辑，如果需要的话
+	return nil
+}
+
+// DeleteIndexTemplate 实现模拟的删除索引模板方法
+func (m *mockElkClient) DeleteIndexTemplate(ctx context.Context, templateName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.shouldFailOps {
+		return errors.New("mock delete index template failure")
+	}
+
+	// 可以在这里添加模拟的模板删除逻辑，如果需要的话
+	return nil
+}
+
 // 确保类型实现了接口
 var _ elk.Client = (*mockElkClient)(nil)

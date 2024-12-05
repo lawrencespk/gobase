@@ -117,3 +117,8 @@ func (h *ElkHook) Close() error {
 
 	return nil
 }
+
+// GetBulkProcessor 返回内部的 BulkProcessor
+func (h *ElkHook) GetBulkProcessor() BulkProcessor {
+	return h.buffer
+}

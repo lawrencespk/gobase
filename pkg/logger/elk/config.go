@@ -13,7 +13,7 @@ type ElkConfig struct {
 	Username  string
 	Password  string
 	Index     string
-	Timeout   int
+	Timeout   time.Duration
 }
 
 // DefaultElkConfig 返回默认配置
@@ -34,7 +34,7 @@ func DefaultElkConfig() *ElkConfig {
 		Username:  conf.ELK.Username,
 		Password:  conf.ELK.Password,
 		Index:     conf.ELK.Index,
-		Timeout:   conf.ELK.Timeout,
+		Timeout:   time.Duration(conf.ELK.Timeout) * time.Millisecond,
 	}
 }
 
