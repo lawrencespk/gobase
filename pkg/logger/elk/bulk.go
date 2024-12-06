@@ -3,6 +3,7 @@ package elk
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,7 @@ type BulkProcessor interface {
 	Flush(ctx context.Context) error
 	Close() error
 	Stats() *BulkStats // 新增：获取统计信息
+	MaxDocSize() int64 // 新增：获取单个文档最大大小
 }
 
 // BulkProcessorConfig 批量处理器的配置
@@ -118,28 +120,35 @@ func NewBulkProcessor(client Client, config *BulkProcessorConfig) BulkProcessor 
 // withRetry 包装需要重试的操作
 func (bp *bulkProcessor) withRetry(ctx context.Context, operation func(context.Context) error) error {
 	var lastErr error
-	for attempt := 0; attempt <= bp.config.RetryCount; attempt++ {
-		select {
-		case <-ctx.Done():
-			return errors.Wrap(ctx.Err(), "context cancelled during retry")
-		default:
-			if err := operation(ctx); err == nil {
-				return nil
-			} else {
-				lastErr = errors.Wrap(err, "operation failed during retry")
-				if attempt < bp.config.RetryCount {
-					waitTime := bp.config.RetryWait * time.Duration(attempt+1)
-					select {
-					case <-ctx.Done():
-						return errors.Wrap(ctx.Err(), "context cancelled during retry wait")
-					case <-time.After(waitTime):
-						continue
-					}
-				}
+	// 初始尝试 + 重试次数
+	maxAttempts := bp.config.RetryCount + 1
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// 如果不是第一次尝试，则等待
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(bp.config.RetryWait):
 			}
 		}
+
+		err := operation(ctx)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		bp.errorCount.Add(1)
+		bp.lastError = err
+
+		// 如果是最后一次尝试，返回错误
+		if attempt == maxAttempts-1 {
+			return fmt.Errorf("failed to flush documents: %w", lastErr)
+		}
 	}
-	return errors.Wrap(lastErr, ErrRetryExhausted.Error())
+
+	return lastErr // 这行实际上永远不会执行到
 }
 
 func (bp *bulkProcessor) Add(ctx context.Context, index string, doc interface{}) error {
@@ -150,23 +159,35 @@ func (bp *bulkProcessor) Add(ctx context.Context, index string, doc interface{})
 		return ErrProcessorClosed
 	}
 
+	// 计算文档大小
 	docSize, err := calculateDocumentSize(doc)
 	if err != nil {
-		return err
+		return errors.WrapWithCode(err, codes.SerializationError, "failed to calculate document size")
 	}
 
+	// 检查单个文档大小是否超过限制
 	if docSize > bp.config.FlushBytes {
+		return ErrDocumentTooLarge
+	}
+
+	// 如果当前批次大小加上新文档会超过限制，先刷新
+	if bp.bytesSize+docSize > bp.config.FlushBytes {
 		if err := bp.flushLocked(ctx); err != nil {
 			return err
 		}
 	}
 
-	bp.documents = append(bp.documents, indexedDocument{index: index, doc: doc})
+	// 添加文档到缓冲区
+	bp.documents = append(bp.documents, indexedDocument{
+		index: index,
+		doc:   doc, // 直接存储文档对象
+	})
 	bp.bytesSize += docSize
 	bp.totalDocs.Add(1)
 	bp.totalBytes.Add(docSize)
 
-	if len(bp.documents) >= bp.config.BatchSize || bp.bytesSize >= bp.config.FlushBytes {
+	// 如果达到批次大小，触发刷新
+	if len(bp.documents) >= bp.config.BatchSize {
 		return bp.flushLocked(ctx)
 	}
 
@@ -184,37 +205,33 @@ func (bp *bulkProcessor) flushLocked(ctx context.Context) error {
 		return nil
 	}
 
-	indexedDocs := make(map[string][]interface{})
-	for _, idoc := range bp.documents {
-		indexedDocs[idoc.index] = append(indexedDocs[idoc.index], idoc.doc)
-	}
+	// 复制需要刷新的文档
+	docsToFlush := make([]indexedDocument, len(bp.documents))
+	copy(docsToFlush, bp.documents)
 
-	err := bp.withRetry(ctx, func(ctx context.Context) error {
+	// 清空缓冲区
+	bp.documents = make([]indexedDocument, 0, bp.config.BatchSize)
+	bp.bytesSize = 0
+
+	// 在释放锁后执行刷新操作
+	return bp.withRetry(ctx, func(ctx context.Context) error {
+		// 按索引分组文档
+		indexedDocs := make(map[string][]interface{})
+		for _, idoc := range docsToFlush {
+			if idoc.index == "" {
+				idoc.index = bp.config.DefaultIndex
+			}
+			indexedDocs[idoc.index] = append(indexedDocs[idoc.index], idoc.doc)
+		}
+
+		// 只在成功时添加文档
 		for index, docs := range indexedDocs {
 			if err := bp.client.BulkIndexDocuments(ctx, index, docs); err != nil {
-				bp.errorCount.Add(1)
-				bp.lastError = err
 				return err
 			}
 		}
 		return nil
 	})
-
-	if err != nil {
-		// 记录错误但不返回，让处理器继续工作
-		bp.errorCount.Add(1)
-		bp.lastError = err
-		// 清空文档列表，防止重复处理失败的文档
-		bp.documents = bp.documents[:0]
-		bp.bytesSize = 0
-		return nil
-	}
-
-	bp.documents = bp.documents[:0]
-	bp.bytesSize = 0
-	bp.flushCount.Add(1)
-	bp.lastFlush.Store(time.Now())
-	return nil
 }
 
 func (bp *bulkProcessor) Close() error {
@@ -288,4 +305,10 @@ func (bp *bulkProcessor) Stats() *BulkStats {
 		LastError:      bp.lastError,
 		LastFlushTime:  bp.lastFlush.Load().(time.Time),
 	}
+}
+
+// MaxDocSize 返回单个文档的最大大小限制
+func (bp *bulkProcessor) MaxDocSize() int64 {
+	// 使用配置中的 FlushBytes 作为单个文档的大小限制
+	return bp.config.FlushBytes
 }

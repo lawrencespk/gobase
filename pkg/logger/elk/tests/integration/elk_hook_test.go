@@ -164,11 +164,37 @@ func testBulkLogging(t *testing.T, ctx context.Context, logger *logrus.Logger, c
 	// 等待所有写入完成
 	wg.Wait()
 
-	// 使用新添加的方法
+	// 在写入完成后，添加更多的调试信息
 	t.Log("正在刷新缓冲区...")
 	if err = hook.GetBulkProcessor().Flush(ctx); err != nil {
 		t.Logf("刷新失败: %v", err)
 	}
+
+	// 获取并打印 bulk processor 的统计信息
+	stats := hook.GetBulkProcessor().Stats()
+	t.Logf("Bulk Processor 统计信息:")
+	t.Logf("- 总文档数: %d", stats.TotalDocuments)
+	t.Logf("- 总字节数: %d", stats.TotalBytes)
+	t.Logf("- 刷新次数: %d", stats.FlushCount)
+	t.Logf("- 错误次数: %d", stats.ErrorCount)
+	if stats.LastError != nil {
+		t.Logf("- 最后错误: %v", stats.LastError)
+	}
+	t.Logf("- 最后刷新时间: %v", stats.LastFlushTime)
+
+	// 增加等待时间
+	t.Log("等待索引刷新...")
+	time.Sleep(5 * time.Second)
+
+	// 手动刷新索引并验证
+	t.Log("手动刷新索引...")
+	err = client.RefreshIndex(ctx, testIndex)
+	if err != nil {
+		t.Fatalf("刷新索引失败: %v", err)
+	}
+
+	// 再次等待并验证
+	time.Sleep(2 * time.Second)
 
 	t.Logf("所有日志写入完成，开始验证")
 
@@ -207,25 +233,30 @@ func testBulkLogging(t *testing.T, ctx context.Context, logger *logrus.Logger, c
 	t.Log("开始验证文档数量...")
 	query := map[string]interface{}{
 		"query": map[string]interface{}{
-			"match": map[string]interface{}{
-				"batch": "test",
-			},
+			"match_all": map[string]interface{}{},
 		},
+		"size":             0,    // 只返回计数
+		"track_total_hits": true, // 确保获取准确的总数
 	}
 
 	result, err := client.Query(ctx, testIndex, query)
 	if err != nil {
 		t.Logf("查询失败: %v", err)
 	} else {
-		t.Logf("查询结果: %+v", result)
+		t.Logf("查询结果详情: %+v", result)
 	}
 
-	// 获取索引统计信息
-	stats, err := client.GetIndexStats(ctx, testIndex)
+	// 获取并打印更详细的索引统计信息
+	indexStats, err := client.GetIndexStats(ctx, testIndex)
 	if err != nil {
 		t.Logf("获取索引统计信息失败: %v", err)
 	} else {
-		t.Logf("索引统计信息: %+v", stats)
+		if stats, ok := indexStats["indices"].(map[string]interface{})[testIndex].(map[string]interface{}); ok {
+			t.Logf("索引详细统计:")
+			t.Logf("- 文档数: %+v", stats["primaries"].(map[string]interface{})["docs"])
+			t.Logf("- 索引操作: %+v", stats["primaries"].(map[string]interface{})["indexing"])
+			t.Logf("- 存储大小: %+v", stats["primaries"].(map[string]interface{})["store"])
+		}
 	}
 
 	t.Fatal("未能在规定时间内完成日志写入和验证")

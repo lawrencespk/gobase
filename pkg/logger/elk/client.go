@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -163,27 +164,34 @@ func (c *ElkClient) BulkIndexDocuments(ctx context.Context, index string, docume
 	}
 
 	var buf bytes.Buffer
-
-	for _, doc := range documents {
-		meta := map[string]interface{}{
-			"index": map[string]interface{}{
-				"_index": index,
-			},
+	for i, doc := range documents {
+		// 写入元数据行
+		metaLine := fmt.Sprintf(`{"index":{"_index":"%s"}}`, index)
+		if _, err := buf.WriteString(metaLine + "\n"); err != nil {
+			return errors.NewELKBulkError(fmt.Sprintf("failed to write metadata for doc %d: %v", i, err), err)
 		}
 
-		if err := json.NewEncoder(&buf).Encode(meta); err != nil {
-			return errors.NewELKBulkError("failed to encode metadata", err)
+		// 处理文档内容
+		docBytes, err := json.Marshal(doc)
+		if err != nil {
+			return errors.NewELKBulkError(fmt.Sprintf("failed to marshal document %d: %v", i, err), err)
 		}
 
-		if err := json.NewEncoder(&buf).Encode(doc); err != nil {
-			return errors.NewELKBulkError("failed to encode document", err)
+		// 写入文档
+		if _, err := buf.Write(docBytes); err != nil {
+			return errors.NewELKBulkError(fmt.Sprintf("failed to write document %d: %v", i, err), err)
+		}
+
+		// 每个文档后添加换行符
+		if _, err := buf.WriteString("\n"); err != nil {
+			return errors.NewELKBulkError(fmt.Sprintf("failed to write newline after document %d: %v", i, err), err)
 		}
 	}
 
+	// 发送批量请求
 	req := esapi.BulkRequest{
-		Body:       bytes.NewReader(buf.Bytes()),
-		Refresh:    "false",
-		FilterPath: []string{"errors", "items.*.error"},
+		Body:    bytes.NewReader(buf.Bytes()),
+		Refresh: "true",
 	}
 
 	res, err := req.Do(ctx, c.client)
@@ -192,20 +200,26 @@ func (c *ElkClient) BulkIndexDocuments(ctx context.Context, index string, docume
 	}
 	defer res.Body.Close()
 
-	if res.IsError() {
-		return errors.NewELKBulkError(
-			fmt.Sprintf("bulk operation failed: %s", res.String()),
-			nil,
-		)
+	// 读取响应
+	respBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return errors.NewELKBulkError("failed to read response body", err)
 	}
 
 	var raw map[string]interface{}
-	if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
-		return errors.NewELKBulkError("failed to parse bulk response", err)
+	if err := json.Unmarshal(respBody, &raw); err != nil {
+		return errors.NewELKBulkError(
+			fmt.Sprintf("failed to parse response: %s", string(respBody)),
+			err,
+		)
 	}
 
-	if raw["errors"].(bool) {
-		return errors.NewELKBulkError("some documents failed to index", nil)
+	// 检查响应中的错误
+	if res.IsError() {
+		return errors.NewELKBulkError(
+			fmt.Sprintf("批量索引失败: %s", string(respBody)),
+			nil,
+		)
 	}
 
 	return nil
@@ -248,7 +262,7 @@ func (c *ElkClient) Query(ctx context.Context, index string, query interface{}) 
 	return result, nil
 }
 
-// Close 关闭客户端连接
+// Close 闭客户端连接
 func (c *ElkClient) Close() error {
 	if !c.isConnected {
 		return nil
@@ -313,7 +327,7 @@ func (c *ElkClient) DeleteIndexTemplate(ctx context.Context, templateName string
 	return nil
 }
 
-// 添加新的方法到 ElkClient
+// 添加的方法到 ElkClient
 func (c *ElkClient) HealthCheck(ctx context.Context) error {
 	resp, err := c.client.Cluster.Health(
 		c.client.Cluster.Health.WithContext(ctx),

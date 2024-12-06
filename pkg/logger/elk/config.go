@@ -18,15 +18,17 @@ type ElkConfig struct {
 
 // DefaultElkConfig 返回默认配置
 func DefaultElkConfig() *ElkConfig {
+	defaultConfig := &ElkConfig{
+		Addresses: []string{"http://localhost:9200"},
+		Username:  "",
+		Password:  "",
+		Index:     "default-index",
+		Timeout:   30 * time.Second,
+	}
+
 	conf := config.GetConfig()
 	if conf == nil || len(conf.ELK.Addresses) == 0 {
-		return &ElkConfig{
-			Addresses: []string{"http://localhost:9200"},
-			Username:  "",
-			Password:  "",
-			Index:     "default-index",
-			Timeout:   30,
-		}
+		return defaultConfig
 	}
 
 	return &ElkConfig{
@@ -34,7 +36,7 @@ func DefaultElkConfig() *ElkConfig {
 		Username:  conf.ELK.Username,
 		Password:  conf.ELK.Password,
 		Index:     conf.ELK.Index,
-		Timeout:   time.Duration(conf.ELK.Timeout) * time.Millisecond,
+		Timeout:   time.Duration(conf.ELK.Timeout) * time.Second,
 	}
 }
 

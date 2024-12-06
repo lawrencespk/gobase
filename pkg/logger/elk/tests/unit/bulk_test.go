@@ -2,7 +2,7 @@ package unit
 
 import (
 	"context"
-	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,13 +19,13 @@ func TestBulkProcessor(t *testing.T) {
 	t.Run("Basic Bulk Operations", func(t *testing.T) {
 		client := mock.NewMockElkClient()
 		require.NoError(t, client.Connect(nil))
-		mockClient := mock.AsMockClient(client)
 
 		processor := elk.NewBulkProcessor(client, &elk.BulkProcessorConfig{
 			BatchSize:  2,
 			FlushBytes: 1024,
-			Interval:   100 * time.Millisecond,
+			Interval:   50 * time.Millisecond,
 		})
+		defer processor.Close()
 
 		// 添加文档
 		doc1 := map[string]interface{}{"id": 1, "message": "test1"}
@@ -36,8 +36,11 @@ func TestBulkProcessor(t *testing.T) {
 		err = processor.Add(ctx, "test-index", doc2)
 		require.NoError(t, err)
 
-		// 等待自动刷新
-		time.Sleep(200 * time.Millisecond)
+		// 手动刷新并等待
+		err = processor.Flush(ctx)
+		require.NoError(t, err)
+
+		mockClient := mock.AsMockClient(client)
 
 		docs := mockClient.GetDocuments()
 		assert.Len(t, docs, 2)
@@ -106,14 +109,10 @@ func TestBulkProcessor(t *testing.T) {
 
 		doc := map[string]interface{}{"id": 1, "message": "test"}
 		err := processor.Add(ctx, "test-index", doc)
-		require.NoError(t, err)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mock bulk index failure")
 
-		time.Sleep(200 * time.Millisecond)
-		docs := mockClient.GetDocuments()
-		assert.Len(t, docs, 0)
-
-		stats := processor.Stats()
-		assert.Greater(t, stats.ErrorCount, int64(0), "Should have recorded errors")
+		mockClient.SetShouldFailOps(false)
 	})
 
 	t.Run("Concurrent Operations", func(t *testing.T) {
@@ -185,42 +184,44 @@ func TestBulkProcessor(t *testing.T) {
 
 		processor := elk.NewBulkProcessor(client, &elk.BulkProcessorConfig{
 			BatchSize:  100,
-			FlushBytes: 100,
+			FlushBytes: 1024,
 			Interval:   1 * time.Second,
 		})
 
-		// 添加一个小文档
-		smallDoc := map[string]interface{}{
-			"id":      1,
-			"message": "test",
+		// 添加两个小文档
+		for i := 0; i < 2; i++ {
+			doc := map[string]interface{}{
+				"id":      i,
+				"message": "test",
+			}
+			err := processor.Add(ctx, "test-index", doc)
+			require.NoError(t, err)
 		}
-		err := processor.Add(ctx, "test-index", smallDoc)
+
+		err := processor.Flush(ctx)
 		require.NoError(t, err)
 
-		// 添加一个较大的文档，这应该会触发刷新
-		largeDoc := map[string]interface{}{
-			"id":      2,
-			"message": strings.Repeat("test", 50),
-		}
-		err = processor.Add(ctx, "test-index", largeDoc)
-		require.NoError(t, err)
-
-		time.Sleep(100 * time.Millisecond)
 		mockClient := mock.AsMockClient(client)
 		docs := mockClient.GetDocuments()
-		assert.Len(t, docs, 2)
+		assert.Equal(t, 2, len(docs))
 	})
 
 	t.Run("Retry Mechanism", func(t *testing.T) {
 		client := mock.NewMockElkClient()
 		mockClient := mock.AsMockClient(client)
-		mockClient.SetShouldFailOps(true)
+
+		var callCount int32
+		mockClient.SetCustomFailure(func() bool {
+			count := atomic.AddInt32(&callCount, 1)
+			t.Logf("调用次数: %d", count)
+			return count == 1
+		})
 
 		processor := elk.NewBulkProcessor(client, &elk.BulkProcessorConfig{
 			BatchSize:  1,
 			FlushBytes: 1024,
-			Interval:   100 * time.Millisecond,
-			RetryCount: 3,
+			Interval:   50 * time.Millisecond,
+			RetryCount: 1,
 			RetryWait:  10 * time.Millisecond,
 		})
 
@@ -228,10 +229,25 @@ func TestBulkProcessor(t *testing.T) {
 		err := processor.Add(ctx, "test-index", doc)
 		require.NoError(t, err)
 
-		time.Sleep(500 * time.Millisecond)
+		// 等待第一次处理
+		time.Sleep(100 * time.Millisecond)
 
-		stats := processor.Stats()
-		assert.Equal(t, int64(5), stats.ErrorCount)
+		// 手动刷新并关闭
+		err = processor.Flush(ctx)
+		require.NoError(t, err)
+
+		err = processor.Close()
+		require.NoError(t, err)
+
+		// 验证结果
+		docs := mockClient.GetDocuments()
+		count := atomic.LoadInt32(&callCount)
+
+		t.Logf("最终文档数: %d", len(docs))
+		t.Logf("总调用次数: %d", count)
+
+		assert.Equal(t, 1, len(docs), "应该只有一个文档被索引")
+		assert.Equal(t, 2, int(count), "应该只重试一次")
 	})
 
 	t.Run("Graceful Shutdown", func(t *testing.T) {

@@ -2,10 +2,14 @@ package elk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 )
 
 // ElkHook 实现 logrus.Hook 接口
@@ -14,7 +18,7 @@ type ElkHook struct {
 	levels      []logrus.Level
 	formatter   logrus.Formatter
 	index       string
-	buffer      BulkProcessor
+	processor   BulkProcessor
 	ctx         context.Context
 	cancel      context.CancelFunc
 	errorLogger logrus.FieldLogger
@@ -22,42 +26,90 @@ type ElkHook struct {
 
 // ElkHookOptions ELK Hook的配置选项
 type ElkHookOptions struct {
-	// Elasticsearch配置
-	Config *ElkConfig
-	// 日志级别，为空则使用所有级别
-	Levels []logrus.Level
-	// 索引名称，为空则使用默认值 "logs"
-	Index string
-	// 批量处理配置
+	Config      *ElkConfig
+	Levels      []logrus.Level
+	Index       string
 	BatchConfig *BulkProcessorConfig
-	// 错误日志记录器
 	ErrorLogger logrus.FieldLogger
+	MaxDocSize  int64  // 单个文档最大大小
+	IndexPrefix string // 索引前缀
+	IndexSuffix string // 索引后缀
 }
 
-// NewElkHook 创建新的ELK Hook
-func NewElkHook(opts ElkHookOptions) (*ElkHook, error) {
+// validateOptions 验证并规范化配置选项
+func validateOptions(opts *ElkHookOptions) error {
 	if opts.Config == nil {
 		opts.Config = DefaultElkConfig()
 	}
+
 	if opts.Index == "" {
-		opts.Index = "logs"
+		if opts.IndexPrefix == "" {
+			opts.IndexPrefix = "logs"
+		}
+		if opts.IndexSuffix == "" {
+			opts.IndexSuffix = time.Now().Format("2006.01.02")
+		}
+		opts.Index = fmt.Sprintf("%s-%s", opts.IndexPrefix, opts.IndexSuffix)
 	}
+
 	if opts.BatchConfig == nil {
 		opts.BatchConfig = &BulkProcessorConfig{
-			BatchSize:  100,
-			FlushBytes: 5 * 1024 * 1024, // 5MB
-			Interval:   time.Second * 5,
-			RetryCount: 3,
-			RetryWait:  time.Second,
+			BatchSize:    50,
+			FlushBytes:   512 * 1024,
+			Interval:     100 * time.Millisecond,
+			RetryCount:   5,
+			RetryWait:    time.Second,
+			CloseTimeout: 10 * time.Second,
+		}
+	} else {
+		if err := validateBatchConfig(opts.BatchConfig); err != nil {
+			return errors.Wrap(err, "invalid batch config")
 		}
 	}
+
+	if opts.MaxDocSize <= 0 {
+		opts.MaxDocSize = 5 * 1024 * 1024 // 默认5MB
+	}
+
 	if opts.ErrorLogger == nil {
 		opts.ErrorLogger = logrus.StandardLogger()
 	}
 
+	return nil
+}
+
+// validateBatchConfig 验证批处理配置
+func validateBatchConfig(cfg *BulkProcessorConfig) error {
+	if cfg.BatchSize <= 0 || cfg.BatchSize > 1000 {
+		return errors.WrapWithCode(nil, codes.ELKConfigError, "invalid batch size")
+	}
+	if cfg.FlushBytes <= 0 {
+		return errors.WrapWithCode(nil, codes.ELKConfigError, "invalid flush bytes")
+	}
+	if cfg.Interval <= 0 {
+		return errors.WrapWithCode(nil, codes.ELKConfigError, "invalid interval")
+	}
+	if cfg.RetryCount < 3 {
+		return errors.WrapWithCode(nil, codes.ELKConfigError, "retry count too low")
+	}
+	if cfg.RetryWait <= 0 {
+		return errors.WrapWithCode(nil, codes.ELKConfigError, "invalid retry wait")
+	}
+	if cfg.CloseTimeout <= 0 {
+		return errors.WrapWithCode(nil, codes.ELKConfigError, "invalid close timeout")
+	}
+	return nil
+}
+
+// NewElkHook 创建新的ELK Hook
+func NewElkHook(opts ElkHookOptions) (*ElkHook, error) {
+	if err := validateOptions(&opts); err != nil {
+		return nil, errors.WrapWithCode(err, codes.ELKConfigError, "invalid options")
+	}
+
 	client := NewElkClient()
 	if err := client.Connect(opts.Config); err != nil {
-		return nil, fmt.Errorf("failed to connect to Elasticsearch: %w", err)
+		return nil, errors.WrapWithCode(err, codes.ELKConnectionError, "failed to connect to Elasticsearch")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -72,8 +124,8 @@ func NewElkHook(opts ElkHookOptions) (*ElkHook, error) {
 		formatter:   &logrus.JSONFormatter{},
 	}
 
-	// 初始化批量处理器
-	hook.buffer = NewBulkProcessor(client, opts.BatchConfig)
+	processor := NewBulkProcessor(client, opts.BatchConfig)
+	hook.processor = processor
 
 	return hook, nil
 }
@@ -88,16 +140,33 @@ func (h *ElkHook) Levels() []logrus.Level {
 
 // Fire 实现 logrus.Hook 接口
 func (h *ElkHook) Fire(entry *logrus.Entry) error {
-	data, err := h.formatter.Format(entry)
-	if err != nil {
-		return fmt.Errorf("failed to format log entry: %w", err)
+	// 创建日志文档
+	doc := map[string]interface{}{
+		"level": entry.Level.String(),
+		"msg":   entry.Message,
+		"time":  entry.Time,
 	}
 
-	// 使用批量处理器添加文档
-	err = h.buffer.Add(h.ctx, h.index, data)
+	// 添加额外的字段
+	for k, v := range entry.Data {
+		doc[k] = v
+	}
+
+	// 检查文档大小（使用 JSON 编码后的大小）
+	docBytes, err := json.Marshal(doc)
 	if err != nil {
+		return errors.WrapWithCode(err, codes.SerializationError, "failed to marshal log entry")
+	}
+
+	maxSize := h.processor.MaxDocSize()
+	if len(docBytes) > int(maxSize) {
+		return errors.WrapWithCode(nil, codes.ELKBulkError, "document size exceeds limit")
+	}
+
+	// 使用批量处理器添加文档对象
+	if err := h.processor.Add(h.ctx, h.index, doc); err != nil {
 		h.errorLogger.WithError(err).Error("failed to add log entry to bulk processor")
-		return err
+		return errors.WrapWithCode(err, codes.ELKBulkError, "failed to add log entry")
 	}
 
 	return nil
@@ -107,12 +176,12 @@ func (h *ElkHook) Fire(entry *logrus.Entry) error {
 func (h *ElkHook) Close() error {
 	h.cancel()
 
-	if err := h.buffer.Close(); err != nil {
-		return fmt.Errorf("failed to close bulk processor: %w", err)
+	if err := h.processor.Close(); err != nil {
+		return errors.WrapWithCode(err, codes.ELKBulkError, "failed to close bulk processor")
 	}
 
 	if err := h.client.Close(); err != nil {
-		return fmt.Errorf("failed to close elasticsearch client: %w", err)
+		return errors.WrapWithCode(err, codes.ELKConnectionError, "failed to close elasticsearch client")
 	}
 
 	return nil
@@ -120,5 +189,22 @@ func (h *ElkHook) Close() error {
 
 // GetBulkProcessor 返回内部的 BulkProcessor
 func (h *ElkHook) GetBulkProcessor() BulkProcessor {
-	return h.buffer
+	return h.processor
+}
+
+// GetStats 获取Hook的统计信息
+func (h *ElkHook) GetStats() *HookStats {
+	procStats := h.processor.Stats()
+	return &HookStats{
+		ProcessorStats: procStats,
+		Index:          h.index,
+		ActiveLevels:   len(h.levels),
+	}
+}
+
+// HookStats Hook的统计信息
+type HookStats struct {
+	ProcessorStats *BulkStats
+	Index          string
+	ActiveLevels   int
 }

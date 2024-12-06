@@ -14,6 +14,7 @@ type mockElkClient struct {
 	documents     []interface{}
 	shouldFailOps bool
 	indexes       map[string]*elk.IndexMapping
+	customFailure func() bool
 }
 
 func NewMockElkClient() *mockElkClient {
@@ -69,7 +70,11 @@ func (m *mockElkClient) BulkIndexDocuments(ctx context.Context, index string, do
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.shouldFailOps {
+	if m.customFailure != nil {
+		if m.customFailure() {
+			return errors.New("mock bulk index failure")
+		}
+	} else if m.shouldFailOps {
 		return errors.New("mock bulk index failure")
 	}
 
@@ -213,3 +218,9 @@ func (m *mockElkClient) DeleteIndexTemplate(ctx context.Context, templateName st
 
 // 确保类型实现了接口
 var _ elk.Client = (*mockElkClient)(nil)
+
+func (m *mockElkClient) SetCustomFailure(f func() bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.customFailure = f
+}

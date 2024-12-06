@@ -52,9 +52,16 @@ func TestRealElasticsearch(t *testing.T) {
 
 	// 清理测试索引
 	t.Cleanup(func() {
-		err := client.DeleteIndex(ctx, testIndexName)
-		if err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := client.DeleteIndex(cleanupCtx, testIndexName); err != nil {
 			t.Logf("Warning: Failed to delete test index: %v", err)
+		}
+
+		// 确保连接在清理完成后关闭
+		if err := client.Close(); err != nil {
+			t.Logf("Warning: Failed to close client: %v", err)
 		}
 	})
 
@@ -180,24 +187,70 @@ func TestRealElasticsearch(t *testing.T) {
 		template := map[string]interface{}{
 			"index_patterns": []string{"test-*"},
 			"settings": map[string]interface{}{
-				"number_of_shards": 1,
+				"number_of_shards":   1,
+				"number_of_replicas": 0,
 			},
-			"mappings": elk.DefaultIndexMapping().Mappings,
+			"mappings": map[string]interface{}{
+				"properties": map[string]interface{}{
+					"timestamp": map[string]interface{}{
+						"type": "date",
+					},
+					"message": map[string]interface{}{
+						"type": "text",
+					},
+					"level": map[string]interface{}{
+						"type": "keyword",
+					},
+				},
+			},
+			"aliases": map[string]interface{}{
+				"test-alias": map[string]interface{}{},
+			},
 		}
 
 		// 创建模板
 		err := client.CreateIndexTemplate(ctx, templateName, template)
-		assert.NoError(t, err, "Should create index template")
+		require.NoError(t, err, "Should create index template")
 
-		// 证使用模板创建的索引
+		// 使用模板创建新索引
 		newIndex := fmt.Sprintf("test-%d", time.Now().Unix())
-		err = client.CreateIndex(ctx, newIndex, nil) // nil mapping将使用模板
-		assert.NoError(t, err, "Should create index using template")
+		createIndexBody := map[string]interface{}{} // 空配置，使用模板默认值
+		err = client.CreateIndex(ctx, newIndex, &elk.IndexMapping{
+			Settings: createIndexBody,
+		})
+		require.NoError(t, err, "Should create index using template")
 
-		// 清理
+		// 验证索引是否创建成功
+		exists, err := client.IndexExists(ctx, newIndex)
+		require.NoError(t, err, "Should check index existence")
+		assert.True(t, exists, "Index should exist")
+
+		// 等待索引准备就绪
+		time.Sleep(1 * time.Second)
+
+		// 验证索引可用性
+		doc := map[string]interface{}{
+			"message":   "test template message",
+			"level":     "info",
+			"timestamp": time.Now(),
+		}
+		err = client.IndexDocument(ctx, newIndex, doc)
+		require.NoError(t, err, "Should index document to template-created index")
+
+		// 清理资源
 		t.Cleanup(func() {
-			client.DeleteIndex(ctx, newIndex)
-			client.DeleteIndexTemplate(ctx, templateName)
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			// 删除测试索引
+			if err := client.DeleteIndex(cleanupCtx, newIndex); err != nil {
+				t.Logf("Warning: Failed to delete test index %s: %v", newIndex, err)
+			}
+
+			// 删除模板
+			if err := client.DeleteIndexTemplate(cleanupCtx, templateName); err != nil {
+				t.Logf("Warning: Failed to delete template %s: %v", templateName, err)
+			}
 		})
 	})
 }
