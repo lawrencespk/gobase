@@ -14,10 +14,13 @@ import (
 
 // 错误定义
 var (
-	ErrProcessorClosed  = errors.NewError(codes.ELKBulkError, "bulk processor is closed", nil)
-	ErrDocumentTooLarge = errors.NewError(codes.ELKBulkError, "document size exceeds flush bytes limit", nil)
-	ErrRetryExhausted   = errors.NewError(codes.ELKBulkError, "retry attempts exhausted", nil)
-	ErrCloseTimeout     = errors.NewError(codes.ELKTimeoutError, "close operation timed out", nil)
+	ErrProcessorClosed   = errors.NewError(codes.ELKBulkError, "bulk processor is closed", nil)
+	ErrDocumentTooLarge  = errors.NewError(codes.ELKBulkError, "document size exceeds flush bytes limit", nil)
+	ErrRetryExhausted    = errors.NewError(codes.ELKBulkError, "retry attempts exhausted", nil)
+	ErrCloseTimeout      = errors.NewError(codes.ELKTimeoutError, "close operation timed out", nil)
+	ErrInvalidBatchSize  = errors.NewError(codes.ELKBulkError, "batch size must be greater than 0", nil)
+	ErrInvalidFlushBytes = errors.NewError(codes.ELKBulkError, "flush bytes must be greater than 0", nil)
+	ErrNilConfig         = errors.NewError(codes.ELKBulkError, "configuration cannot be nil", nil)
 )
 
 // BulkStats 统计信息
@@ -88,6 +91,19 @@ func calculateDocumentSize(doc interface{}) (int64, error) {
 
 // NewBulkProcessor 创建新的批量处理器
 func NewBulkProcessor(client Client, config *BulkProcessorConfig) BulkProcessor {
+	if config == nil {
+		return nil
+	}
+
+	// 验证必要的配置参数
+	if config.BatchSize <= 0 {
+		return nil
+	}
+	if config.FlushBytes <= 0 {
+		return nil
+	}
+
+	// 设置默认值
 	if config.DefaultIndex == "" {
 		config.DefaultIndex = "default"
 	}
