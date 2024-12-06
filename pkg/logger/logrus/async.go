@@ -1,10 +1,11 @@
 package logrus
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"gobase/pkg/errors"
 )
 
 // AsyncConfig 异步写入配置
@@ -85,7 +86,7 @@ func (w *AsyncWriter) Stop() error {
 	if w.config.FlushOnExit {
 		// 先刷新数据
 		if err := w.Flush(); err != nil { // 刷新数据
-			return err
+			return errors.NewOperationFailedError("failed to flush async writer", err)
 		}
 	}
 	return nil
@@ -102,7 +103,7 @@ func (w *AsyncWriter) Flush() error {
 		select {
 		case data := <-w.buffer:
 			if _, err := w.writer.Write(data); err != nil { // 写入数据
-				return err // 返回错误
+				return errors.NewOperationFailedError("failed to write data in flush", err)
 			}
 		default:
 			// 缓冲区已空
@@ -131,13 +132,14 @@ func (w *AsyncWriter) run() {
 			totalSize += len(b) // 计算总大小
 		}
 
-		data := make([]byte, 0, totalSize)
+		data := make([]byte, 0, totalSize) // 创建数据
 		for _, b := range buffer {
 			data = append(data, b...) // 合并数据
 		}
 
 		if _, err := w.writer.Write(data); err != nil { // 写入数据
-			fmt.Printf("async write error: %v\n", err) // 打印错误
+			// 使用错误处理中间件记录错误
+			_ = errors.NewOperationFailedError("async write failed", err)
 		}
 
 		// 清空缓冲区

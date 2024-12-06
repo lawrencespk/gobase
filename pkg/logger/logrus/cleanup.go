@@ -1,11 +1,13 @@
 package logrus
 
 import (
-	"fmt"
+	"gobase/pkg/errors"
 	"os"
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // CleanupConfig 清理配置
@@ -94,7 +96,8 @@ func (c *LogCleaner) cleanupOldLogs() {
 			} else {
 				// 删除过期文件
 				if err := os.Remove(file); err != nil { // 删除文件
-					fmt.Printf("remove expired log file error: %v\n", err) // 打印错误
+					// 记录错误但继续处理其他文件
+					logrus.Error(errors.NewFileDeleteError("remove expired log file error", err)) // 打印删除过期日志文件失败
 				}
 			}
 		}
@@ -103,7 +106,8 @@ func (c *LogCleaner) cleanupOldLogs() {
 		if len(validFiles) > c.config.MaxBackups {
 			for _, file := range validFiles[c.config.MaxBackups:] {
 				if err := os.Remove(file); err != nil { // 删除文件
-					fmt.Printf("remove old log file error: %v\n", err) // 打印错误
+					// 记录错误但继续处理其他文件
+					logrus.Error(errors.NewFileDeleteError("remove old log file error", err)) // 打印删除旧日志文件失败
 				}
 			}
 		}

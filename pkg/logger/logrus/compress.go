@@ -2,12 +2,14 @@ package logrus
 
 import (
 	"compress/gzip"
-	"fmt"
 	"io"
-	"log"
 	"os"
 	"sync"
 	"time"
+
+	"gobase/pkg/errors"
+
+	"github.com/sirupsen/logrus"
 )
 
 // CompressConfig 压缩配置
@@ -46,7 +48,7 @@ func (c *LogCompressor) Start() {
 		return
 	}
 
-	log.Printf("Starting compressor with config: %+v", c.config) // 打印压缩配置
+	logrus.WithField("config", c.config).Info("Starting compressor") // 打印压缩配置
 
 	c.started = true // 设置为已启动
 	c.wg.Add(1)      // 添加等待组
@@ -57,34 +59,34 @@ func (c *LogCompressor) Start() {
 
 		// 立即执行一次压缩
 		if err := c.compressLogs(); err != nil {
-			log.Printf("Error in initial compression: %v", err) // 打印初始压缩错误
+			logrus.WithError(err).Error("Error in initial compression") // 打印初始压缩错误
 		}
 
 		for {
 			select {
 			case <-c.stopChan:
-				log.Printf("Compressor received stop signal") // 打印停止信号
+				logrus.Info("Compressor received stop signal") // 打印停止信号
 				return
 			case <-ticker.C:
-				log.Printf("Compressor ticker triggered") // 打印定时器触发
+				logrus.Debug("Compressor ticker triggered") // 打印定时器触发
 				if err := c.compressLogs(); err != nil {
-					log.Printf("Error compressing logs: %v", err) // 打印压缩日志错误
+					logrus.WithError(err).Error("Error compressing logs") // 打印压缩日志错误
 				}
 			}
 		}
 	}()
 
-	log.Printf("Compressor started successfully") // 打印压缩器启动成功
+	logrus.Info("Compressor started successfully") // 打印压缩器启动成功
 }
 
 // compressLogs 压缩日志文件
 func (c *LogCompressor) compressLogs() error {
-	log.Printf("Starting compression cycle with paths: %v", c.config.LogPaths) // 打印压缩路径
+	logrus.WithField("paths", c.config.LogPaths).Info("Starting compression cycle") // 打印压缩路径
 
 	for _, path := range c.config.LogPaths {
 		// 跳过标准输出和标准错误
 		if path == "stdout" || path == "stderr" {
-			log.Printf("Skipping special path: %s", path) // 打印跳过特殊路径
+			logrus.WithField("path", path).Debug("Skipping special path") // 打印跳过特殊路径
 			continue
 		}
 
@@ -92,13 +94,13 @@ func (c *LogCompressor) compressLogs() error {
 
 		// 检查是否已经存在压缩文件
 		if _, err := os.Stat(compressedPath); err == nil {
-			log.Printf("Compressed file already exists: %s", compressedPath) // 打印压缩文件已存在
+			logrus.WithField("path", compressedPath).Debug("Compressed file already exists") // 打印压缩文件已存在
 			// 如果源文件仍然存在，尝试再次删除
 			if _, err := os.Stat(path); err == nil && c.config.DeleteSource {
 				if err := os.Remove(path); err != nil {
-					log.Printf("Warning: Could not delete existing source file %s: %v", path, err) // 打印删除源文件失败
+					logrus.WithError(err).WithField("path", path).Warn("Could not delete existing source file") // 打印删除源文件失败
 				} else {
-					log.Printf("Successfully deleted existing source file: %s", path) // 打印删除源文件成功
+					logrus.WithField("path", path).Info("Successfully deleted existing source file") // 打印删除源文件成功
 				}
 			}
 			continue
@@ -108,31 +110,34 @@ func (c *LogCompressor) compressLogs() error {
 		content, err := func() ([]byte, error) {
 			srcFile, err := os.OpenFile(path, os.O_RDONLY, 0644) // 打开源文件
 			if err != nil {
-				return nil, fmt.Errorf("failed to open source file: %w", err) // 打印打开源文件失败
+				return nil, errors.NewFileNotFoundError("failed to open source file", err) // 打开源文件失败
 			}
 			defer srcFile.Close() // 关闭源文件
 
 			data, err := io.ReadAll(srcFile) // 读取源文件内容
 			if err != nil {
-				return nil, fmt.Errorf("failed to read source file: %w", err) // 打印读取源文件失败
+				return nil, errors.NewFileDownloadError("failed to read source file", err) // 读取源文件失败
 			}
 
-			log.Printf("Read %d bytes from source file: %s", len(data), path) // 打印读取源文件内容
+			logrus.WithFields(logrus.Fields{
+				"bytes": len(data),
+				"path":  path,
+			}).Debug("Read from source file") // 打印读取源文件内容
 			return data, nil
 		}()
 
 		if err != nil {
 			if os.IsNotExist(err) {
-				log.Printf("File does not exist: %s", path) // 打印文件不存在
+				logrus.WithField("path", path).Debug("File does not exist") // 打印文件不存在
 				continue
 			}
-			log.Printf("Error reading source file: %v", err) // 打印读取源文件失败
+			logrus.WithError(err).WithField("path", path).Error("Error reading source file") // 打印读取源文件失败
 			continue
 		}
 
 		// 如果文件内容为空，跳过
 		if len(content) == 0 {
-			log.Printf("Skipping empty file: %s", path) // 打印跳过空文件
+			logrus.WithField("path", path).Debug("Skipping empty file") // 打印跳过空文件
 			continue
 		}
 
@@ -140,7 +145,7 @@ func (c *LogCompressor) compressLogs() error {
 		if err := func() error {
 			gzFile, err := os.Create(compressedPath)
 			if err != nil {
-				return fmt.Errorf("failed to create compressed file: %w", err) // 打印创建压缩文件失败
+				return errors.NewFileUploadError("failed to create compressed file", err)
 			}
 			defer gzFile.Close() // 关闭压缩文件
 
@@ -149,37 +154,46 @@ func (c *LogCompressor) compressLogs() error {
 
 			written, err := gzWriter.Write(content) // 写入压缩数据
 			if err != nil {
-				return fmt.Errorf("failed to write compressed data: %w", err) // 打印写入压缩数据失败
+				return errors.NewFileUploadError("failed to write compressed data", err)
 			}
-			log.Printf("Wrote %d bytes to compressed file", written) // 打印写入压缩数据
+			logrus.WithField("bytes", written).Debug("Wrote to compressed file") // 打印写入压缩数据
 
 			if err := gzWriter.Close(); err != nil {
-				return fmt.Errorf("failed to close gzip writer: %w", err) // 打印关闭压缩写入器失败
+				return errors.NewFileUploadError("failed to close gzip writer", err)
 			}
 
 			return nil
 		}(); err != nil {
-			log.Printf("Error compressing file: %v", err) // 打印压缩文件失败
-			os.Remove(compressedPath)                     // 删除压缩文件
-			return err                                    // 返回错误
+			logrus.WithError(err).Error("Error compressing file") // 打印压缩文件失败
+			os.Remove(compressedPath)                             // 删除压缩文件
+			return err                                            // 返回错误
 		}
 
-		log.Printf("Successfully compressed %s to %s", path, compressedPath) // 打印压缩文件成功
+		logrus.WithFields(logrus.Fields{
+			"source": path,
+			"target": compressedPath,
+		}).Info("Successfully compressed file") // 打印压缩文件成功
 
 		// 如果需要删除源文件，尝试删除
 		if c.config.DeleteSource {
 			// 多次尝试删除源文件
 			maxRetries := 3
-			for i := 0; i < maxRetries; i++ {
-				if err := os.Remove(path); err != nil {
-					if i < maxRetries-1 {
-						log.Printf("Retry %d: Could not delete source file %s: %v", i+1, path, err) // 打印删除源文件失败
-						time.Sleep(time.Second)                                                     // 等待一秒后重试
+			for i := 0; i < maxRetries; i++ { // 多次尝试删除源文件
+				if err := os.Remove(path); err != nil { // 删除源文件
+					if i < maxRetries-1 { // 如果未达到最大重试次数
+						logrus.WithError(err).WithFields(logrus.Fields{ // 打印删除源文件失败
+							"path":  path,  // 路径
+							"retry": i + 1, // 重试次数
+						}).Warn("Could not delete source file") // 打印删除源文件失败
+						time.Sleep(time.Second) // 等待一秒后重试
 						continue
 					}
-					log.Printf("Warning: Failed to delete source file after %d retries: %s", maxRetries, path) // 打印删除源文件失败
+					logrus.WithError(err).WithFields(logrus.Fields{ // 打印删除源文件失败
+						"path":    path,       // 路径
+						"retries": maxRetries, // 重试次数
+					}).Warn("Failed to delete source file") // 打印删除源文件失败
 				} else {
-					log.Printf("Successfully deleted source file: %s", path) // 打印删除源文件成功
+					logrus.WithField("path", path).Info("Successfully deleted source file") // 打印删除源文件成功
 					break
 				}
 			}

@@ -5,6 +5,11 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"gobase/pkg/errors"
+	"gobase/pkg/errors/types"
+
+	"github.com/sirupsen/logrus"
 )
 
 // FileOptions 文件操作配置
@@ -71,7 +76,7 @@ func (fm *FileManager) Write(p []byte) (n int, err error) {
 func (fm *FileManager) WriteToFile(filename string, p []byte) (n int, err error) {
 	handle, err := fm.getHandle(filename)
 	if err != nil {
-		return 0, err
+		return 0, errors.NewFileOperationError("获取文件句柄失败", err)
 	}
 
 	handle.mu.Lock()         // 锁定
@@ -80,13 +85,13 @@ func (fm *FileManager) WriteToFile(filename string, p []byte) (n int, err error)
 	// 写入缓冲区
 	n, err = handle.buffer.Write(p)
 	if err != nil {
-		return n, err
+		return n, errors.NewFileWriteError("写入缓冲区失败", err)
 	}
 
 	// 如果缓冲区超过阈值，立即刷新
 	if handle.buffer.Len() >= fm.opts.BufferSize {
 		if err := fm.flushHandle(handle); err != nil {
-			return n, err
+			return n, errors.NewFileFlushError("刷新缓冲区失败", err)
 		}
 	}
 
@@ -99,11 +104,11 @@ func (fm *FileManager) flushHandle(handle *FileHandle) error {
 	if handle.buffer.Len() > 0 {
 		_, err := handle.buffer.WriteTo(handle.file)
 		if err != nil {
-			return err
+			return errors.NewFileWriteError("写入文件失败", err)
 		}
 		// 确保写入磁盘
 		if err := handle.file.Sync(); err != nil {
-			return err
+			return errors.NewFileFlushError("同步文件失败", err)
 		}
 	}
 	return nil
@@ -134,7 +139,7 @@ func (fm *FileManager) getHandle(filename string) (*FileHandle, error) {
 
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil, err
+		return nil, errors.NewFileOpenError("打开文件失败", err)
 	}
 
 	handle = &FileHandle{
@@ -174,12 +179,16 @@ func (fm *FileManager) closeIdleFiles() {
 	now := time.Now()
 	for filename, handle := range fm.files {
 		if now.Sub(handle.lastUse) > time.Minute {
-			handle.mu.Lock()                   // 锁定
-			handle.buffer.WriteTo(handle.file) // 写入文件
-			handle.file.Close()                // 关闭文件
-			fm.pool.Put(handle.buffer)         // 释放缓冲区
-			handle.mu.Unlock()                 // 解锁
-			delete(fm.files, filename)         // 删除文件句柄
+			handle.mu.Lock() // 锁定
+			if _, err := handle.buffer.WriteTo(handle.file); err != nil {
+				logrus.WithError(errors.NewFileWriteError("写入文件失败", err)).Error("关闭空闲文件时写入失败")
+			}
+			if err := handle.file.Close(); err != nil {
+				logrus.WithError(errors.NewFileCloseError("关闭文件失败", err)).Error("关闭空闲文件失败")
+			}
+			fm.pool.Put(handle.buffer) // 释放缓冲区
+			handle.mu.Unlock()         // 解锁
+			delete(fm.files, filename) // 删除文件句柄
 		}
 	}
 }
@@ -201,14 +210,32 @@ func (fm *FileManager) Close() error {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
 
+	var errs []error
 	for _, handle := range fm.files {
-		handle.mu.Lock()           // 锁定
-		fm.flushHandle(handle)     // 刷新文件
-		handle.file.Close()        // 关闭文件
+		handle.mu.Lock() // 锁定
+		if err := fm.flushHandle(handle); err != nil {
+			errs = append(errs, errors.NewFileFlushError("关闭时刷新失败", err))
+		}
+		if err := handle.file.Close(); err != nil {
+			errs = append(errs, errors.NewFileCloseError("关闭文件失败", err))
+		}
 		fm.pool.Put(handle.buffer) // 释放缓冲区
 		handle.mu.Unlock()         // 解锁
 	}
 
 	fm.files = nil // 清空文件句柄映射
+
+	if len(errs) > 0 {
+		// 将 []error 转换为 []interface{}
+		errDetails := make([]interface{}, len(errs))
+		for i, err := range errs {
+			errDetails[i] = err
+		}
+		baseErr := errors.NewFileOperationError("关闭文件管理器时发生错误", nil)
+		if customErr, ok := baseErr.(types.Error); ok {
+			return customErr.WithDetails(errDetails...)
+		}
+		return baseErr
+	}
 	return nil
 }

@@ -2,6 +2,7 @@ package logrus
 
 import (
 	"context"
+	"gobase/pkg/errors"
 	"gobase/pkg/logger/elk"
 
 	"github.com/sirupsen/logrus"
@@ -15,13 +16,16 @@ type Hook struct {
 
 // NewHook 创建一个新的 Hook
 func NewHook() (*Hook, error) {
-	client := elk.NewElkClient()
-	return &Hook{client: client, levels: logrus.AllLevels}, nil
+	client := elk.NewElkClient() // 创建 ELK 客户端
+	if client == nil {
+		return nil, errors.NewELKConnectionError("failed to create ELK client", nil) // 创建 ELK 客户端失败
+	}
+	return &Hook{client: client, levels: logrus.AllLevels}, nil // 返回 Hook
 }
 
 // NewHookWithClient 使用提供的客户端创建 Hook（用于测试）
-func NewHookWithClient(client elk.Client) *Hook {
-	return &Hook{client: client, levels: logrus.AllLevels}
+func NewHookWithClient(client elk.Client) *Hook { // 使用提供的客户端创建 Hook（用于测试）
+	return &Hook{client: client, levels: logrus.AllLevels} // 返回 Hook
 }
 
 // SetLevels 设置 Hook 适用的日志级别
@@ -33,14 +37,17 @@ func (h *Hook) SetLevels(levels []logrus.Level) {
 func (h *Hook) Fire(entry *logrus.Entry) error {
 	// 将日志条目转换为文档
 	document := map[string]interface{}{
-		"level":   entry.Level.String(),
-		"message": entry.Message,
-		"time":    entry.Time,
-		"data":    entry.Data,
+		"level":   entry.Level.String(), // 日志级别
+		"message": entry.Message,        // 日志消息
+		"time":    entry.Time,           // 日志时间
+		"data":    entry.Data,           // 日志数据
 	}
 
 	// 使用 IndexDocument 方法而不是 Write
-	return h.client.IndexDocument(context.Background(), "logs", document)
+	if err := h.client.IndexDocument(context.Background(), "logs", document); err != nil {
+		return errors.NewELKIndexError("failed to index log entry", err) // 写入日志失败
+	}
+	return nil
 }
 
 // Levels 返回 Hook 适用的日志级别

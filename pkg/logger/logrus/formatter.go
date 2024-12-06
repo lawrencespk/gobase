@@ -4,14 +4,18 @@ import (
 	"encoding/json"
 	"time"
 
+	"gobase/pkg/errors/types"
+
 	"github.com/sirupsen/logrus"
 )
 
+// customFormatter 自定义格式化器
 type customFormatter struct {
 	TimestampFormat string // 时间格式
 	PrettyPrint     bool   // 是否美化打印
 }
 
+// newFormatter 创建格式化器
 func newFormatter(opts *Options) logrus.Formatter {
 	return &customFormatter{
 		TimestampFormat: time.RFC3339,     // 时间格式
@@ -19,6 +23,7 @@ func newFormatter(opts *Options) logrus.Formatter {
 	}
 }
 
+// Format 格式化日志
 func (f *customFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	data := make(map[string]interface{})
 
@@ -43,10 +48,8 @@ func (f *customFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 	// 错误字段特殊处理
 	if err, ok := entry.Data["error"]; ok {
-		if customErr, ok := err.(interface{ Code() string }); ok {
-			data["error_code"] = customErr.Code() // 错误代码
-		}
-		if customErr, ok := err.(interface{ Stack() []string }); ok {
+		if customErr, ok := err.(types.Error); ok {
+			data["error_code"] = customErr.Code()   // 错误代码
 			data["error_stack"] = customErr.Stack() // 错误堆栈
 		}
 	}

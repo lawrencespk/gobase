@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gobase/pkg/errors"
 )
 
 // RecoveryConfig 错误恢复配置
@@ -51,7 +53,7 @@ func (w *RecoveryWriter) Write(p []byte) (n int, err error) {
 				if w.config.PanicHandler != nil { // 如果panic处理器不为空
 					w.config.PanicHandler(r, debug.Stack()) // 调用panic处理器
 				}
-				err = fmt.Errorf("panic during write: %v", r) // 设置错误
+				err = errors.NewSystemError("panic during write", fmt.Errorf("%v", r)) // 设置错误
 			}
 		}()
 		n, err = w.writer.Write(p) // 写入数据
@@ -122,7 +124,9 @@ func (w *RecoveryWriter) Close() error {
 	w.mu.Unlock() // 解锁
 
 	if closer, ok := w.writer.(io.Closer); ok { // 如果writer实现了io.Closer接口
-		return closer.Close() // 关闭writer
+		if err := closer.Close(); err != nil { // 关闭writer
+			return errors.NewFileCloseError("failed to close writer", err)
+		}
 	}
 	return nil
 }

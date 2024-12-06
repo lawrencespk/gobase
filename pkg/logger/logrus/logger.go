@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"gobase/pkg/errors"
 	"gobase/pkg/logger/types"
 
 	"github.com/sirupsen/logrus"
@@ -60,12 +61,12 @@ func NewLogger(fm *FileManager, config QueueConfig, options *Options) (*logrusLo
 			default: // 默认输出到文件
 				// 确保目录存在
 				if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-					return nil, fmt.Errorf("failed to create log directory: %v", err) // 打印创建日志目录失败
+					return nil, errors.NewFileOperationError("failed to create log directory", err) // 创建日志目录失败
 				}
 
 				file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 				if err != nil {
-					return nil, fmt.Errorf("failed to open log file %s: %v", path, err) // 打印打开日志文件失败
+					return nil, errors.NewFileOperationError("failed to open log file", err) // 打开日志文件失败
 				}
 				w = file
 			}
@@ -85,7 +86,7 @@ func NewLogger(fm *FileManager, config QueueConfig, options *Options) (*logrusLo
 	// 初始化写入队列
 	queue, err := NewWriteQueue(fm, config) // 创建写入队列
 	if err != nil {
-		return nil, fmt.Errorf("failed to create write queue: %w", err) // 打印创建写入队列失败
+		return nil, errors.Wrap(err, "failed to create write queue")
 	}
 	l.writeQueue = queue // 设置写入队列
 
@@ -281,14 +282,14 @@ func (l *logrusLogger) Sync() error {
 	// 停止异步写入器
 	if l.asyncWriter != nil {
 		if err := l.asyncWriter.Stop(); err != nil { // 停止异步写入器
-			errs = append(errs, err) // 添加错误
+			errs = append(errs, errors.Wrap(err, "failed to stop async writer")) // 添加错误
 		}
 	}
 
 	// 关闭文件管理器
 	if l.fileManager != nil {
 		if err := l.fileManager.Close(); err != nil { // 关闭文件管理器
-			errs = append(errs, err) // 添加错误
+			errs = append(errs, errors.Wrap(err, "failed to close file manager")) // 添加错误
 		}
 	}
 
@@ -297,12 +298,12 @@ func (l *logrusLogger) Sync() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := l.writeQueue.Close(ctx); err != nil { // 关闭写入队列
-			errs = append(errs, err) // 添加错误
+			errs = append(errs, errors.Wrap(err, "failed to close write queue")) // 添加错误
 		}
 	}
 
 	if len(errs) > 0 {
-		return fmt.Errorf("sync errors: %v", errs) // 返回同步错误
+		return errors.NewSystemError("sync errors", fmt.Errorf("%v", errs)) // 返回同步错误
 	}
 	return nil
 }
@@ -416,14 +417,14 @@ func (l *logrusLogger) Close() error {
 
 	// 先同步日志
 	if err := l.Sync(); err != nil { // 同步日志
-		errs = append(errs, fmt.Errorf("sync error: %w", err)) // 添加错误
+		errs = append(errs, errors.Wrap(err, "sync error")) // 添加错误
 	}
 
 	// 关闭所有writers
 	for _, w := range l.writers {
 		if closer, ok := w.(io.Closer); ok {
 			if err := closer.Close(); err != nil { // 关闭writer
-				errs = append(errs, fmt.Errorf("writer close error: %w", err)) // 添加错误
+				errs = append(errs, errors.Wrap(err, "writer close error")) // 添加错误
 			}
 		}
 	}
@@ -432,7 +433,7 @@ func (l *logrusLogger) Close() error {
 	l.writers = nil
 
 	if len(errs) > 0 {
-		return fmt.Errorf("close errors: %v", errs) // 返回关闭错误
+		return errors.NewSystemError("close errors", fmt.Errorf("%v", errs)) // 返回关闭错误
 	}
 	return nil
 }

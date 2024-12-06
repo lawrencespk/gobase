@@ -182,3 +182,38 @@ func NewEncryptionError(message string, cause error) error {
 func NewDecryptionError(message string, cause error) error {
 	return NewError(codes.DecryptionError, message, cause)
 }
+
+// NewFileDeleteError 创建文件删除错误
+func NewFileDeleteError(message string, cause error) error {
+	return NewError(codes.FileDeleteError, message, cause)
+}
+
+// NewFileOperationError 创建文件操作错误
+func NewFileOperationError(message string, cause error) error {
+	return NewError(codes.FileOperationError, message, cause)
+}
+
+// NewFileOpenError 创建文件打开错误
+func NewFileOpenError(message string, cause error) error {
+	return NewError(codes.FileOpenError, message, cause)
+}
+
+// NewFileWriteError 创建文件写入错误
+func NewFileWriteError(message string, cause error) error {
+	return NewError(codes.FileWriteError, message, cause)
+}
+
+// NewFileReadError 创建文件读取错误
+func NewFileReadError(message string, cause error) error {
+	return NewError(codes.FileReadError, message, cause)
+}
+
+// NewFileCloseError 创建文件关闭错误
+func NewFileCloseError(message string, cause error) error {
+	return NewError(codes.FileCloseError, message, cause)
+}
+
+// NewFileFlushError 创建文件刷新错误
+func NewFileFlushError(message string, cause error) error {
+	return NewError(codes.FileFlushError, message, cause)
+}

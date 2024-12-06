@@ -2,7 +2,8 @@ package logrus
 
 import (
 	"context"
-	"errors"
+	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -10,7 +11,7 @@ import (
 
 // 定义错误变量
 var (
-	errQueueFull = errors.New("write queue is full")
+	errQueueFull = errors.NewError(codes.ResourceExhausted, "write queue is full", nil)
 )
 
 // QueueConfig 队列配置
@@ -39,16 +40,16 @@ type WriteQueue struct {
 // validateConfig 验证配置
 func validateConfig(config QueueConfig) error {
 	if config.MaxSize <= 0 {
-		return errors.New("maxSize must be positive") // 最大队列大小必须为正数
+		return errors.NewValidationError("maxSize must be positive", nil) // 最大队列大小必须为正数
 	}
 	if config.BatchSize <= 0 {
-		return errors.New("batchSize must be positive") // 批处理大小必须为正数
+		return errors.NewValidationError("batchSize must be positive", nil) // 批处理大小必须为正数
 	}
 	if config.Workers <= 0 {
-		return errors.New("workers must be positive") // 工作协程数量必须为正数
+		return errors.NewValidationError("workers must be positive", nil) // 工作协程数量必须为正数
 	}
 	if config.FlushInterval <= 0 {
-		return errors.New("flushInterval must be positive") // 刷新间隔必须为正数
+		return errors.NewValidationError("flushInterval must be positive", nil) // 刷新间隔必须为正数
 	}
 	return nil
 }
@@ -81,8 +82,8 @@ func NewWriteQueue(writer Writer, config QueueConfig) (*WriteQueue, error) {
 // Write 写入数据
 func (q *WriteQueue) Write(p []byte) (n int, err error) {
 	// 检查队列是否正在运行
-	if atomic.LoadInt32(&q.running) == 0 { // 检查队列是否正在运行
-		return 0, errors.New("queue not running") // 返回错误
+	if atomic.LoadInt32(&q.running) == 0 {
+		return 0, errors.NewOperationFailedError("queue not running", nil)
 	}
 
 	// 复制数据
@@ -177,24 +178,24 @@ func (q *WriteQueue) writeWithRetry(data []byte) bool {
 
 // Close 关闭队列
 func (q *WriteQueue) Close(ctx context.Context) error {
-	if !atomic.CompareAndSwapInt32(&q.running, 1, 0) { // 检查队列是否正在运行
-		return nil // 返回成功
+	if !atomic.CompareAndSwapInt32(&q.running, 1, 0) {
+		return nil
 	}
 
 	close(q.queue)
 
-	done := make(chan struct{})
+	done := make(chan struct{}) // 结束信号
 	go func() {
 		q.wg.Wait() // 等待工作协程完成
 		close(done)
 	}()
 
 	select {
-	case <-done:
+	case <-done: // 结束信号
 		return nil
 	case <-ctx.Done(): // 上下文结束
-		close(q.done)    // 关闭结束信号
-		return ctx.Err() // 返回错误
+		close(q.done)
+		return errors.NewShutdownError("queue shutdown timeout", ctx.Err()) // 返回关闭错误
 	}
 }
 

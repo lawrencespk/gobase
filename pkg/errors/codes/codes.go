@@ -69,11 +69,18 @@ const (
 	PermissionDenied = "2203" // 权限被拒绝
 
 	// 文件操作错误码 (2300-2399)
-	FileNotFound      = "2300" // 文件不存在
-	FileUploadError   = "2301" // 文件上传错误
-	FileDownloadError = "2302" // 文件下载错误
-	InvalidFileType   = "2303" // 文件类型无效
-	FileTooLarge      = "2304" // 文件太大
+	FileNotFound       = "2300" // 文件不存在
+	FileUploadError    = "2301" // 文件上传错误
+	FileDownloadError  = "2302" // 文件下载错误
+	InvalidFileType    = "2303" // 文件类型无效
+	FileTooLarge       = "2304" // 文件太大
+	FileDeleteError    = "2305" // 文件删除错误
+	FileOperationError = "2306" // 文件操作错误
+	FileOpenError      = "2307" // 文件打开错误
+	FileWriteError     = "2308" // 文件写入错误
+	FileReadError      = "2309" // 文件读取错误
+	FileCloseError     = "2310" // 文件关闭错误
+	FileFlushError     = "2311" // 文件刷新错误
 
 	// 通信相关错误码 (2400-2499)
 	MessageError    = "2400" // 消息错误
