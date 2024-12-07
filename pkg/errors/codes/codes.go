@@ -124,4 +124,16 @@ const (
 	ConfigNotFound    = "2900" // 配置不存在
 	ConfigInvalid     = "2901" // 配置无效
 	ConfigUpdateError = "2902" // 配置更新错误
+
+	// Nacos错误码 (3000-3099)
+	NacosConnectError   = "3000" // Nacos连接错误
+	NacosAuthError      = "3001" // Nacos认证错误
+	NacosConfigError    = "3002" // Nacos配置错误
+	NacosWatchError     = "3003" // Nacos监听错误
+	NacosPublishError   = "3004" // Nacos发布错误
+	NacosNamespaceError = "3005" // Nacos命名空间错误
+	NacosGroupError     = "3006" // Nacos分组错误
+	NacosDataIDError    = "3007" // Nacos数据ID错误
+	NacosTimeoutError   = "3008" // Nacos超时错误
+	NacosOperationError = "3009" // Nacos操作错误
 )
