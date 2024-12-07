@@ -1,16 +1,20 @@
 package viper
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
+	"gobase/pkg/config/types"
 	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 )
+
+var _ types.Loader = (*Loader)(nil)
 
 // Loader 配置加载器
 type Loader struct {
@@ -19,6 +23,8 @@ type Loader struct {
 	configType string
 	envPrefix  string
 	enableEnv  bool
+	watchers   map[string][]func(string, interface{})
+	mutex      sync.RWMutex
 }
 
 // NewLoader 创建配置加载器
@@ -28,7 +34,6 @@ func NewLoader(configFile string, enableEnv bool, envPrefix string) *Loader {
 	// 设置配置文件
 	if configFile != "" {
 		v.SetConfigFile(configFile)
-		v.SetConfigType(strings.TrimPrefix(filepath.Ext(configFile), "."))
 	}
 
 	// 设置环境变量
@@ -46,6 +51,7 @@ func NewLoader(configFile string, enableEnv bool, envPrefix string) *Loader {
 		configType: strings.TrimPrefix(filepath.Ext(configFile), "."),
 		enableEnv:  enableEnv,
 		envPrefix:  envPrefix,
+		watchers:   make(map[string][]func(string, interface{})),
 	}
 }
 
@@ -53,13 +59,15 @@ func NewLoader(configFile string, enableEnv bool, envPrefix string) *Loader {
 func (l *Loader) Load() error {
 	if err := l.viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			return errors.NewConfigNotFoundError(
-				fmt.Sprintf("config file not found: %s", l.configFile),
+			return errors.NewError(
+				codes.ConfigNotFound,
+				"config file not found",
 				err,
 			)
 		}
-		return errors.NewConfigInvalidError(
-			fmt.Sprintf("failed to read config file: %s", l.configFile),
+		return errors.NewError(
+			codes.ConfigLoadError,
+			"failed to read config file",
 			err,
 		)
 	}
@@ -109,6 +117,7 @@ func (l *Loader) GetStringMapString(key string) map[string]string {
 // Set 设置配置值
 func (l *Loader) Set(key string, value interface{}) {
 	l.viper.Set(key, value)
+	l.notifyWatchers(key)
 }
 
 // IsSet 检查配置是否存在
@@ -118,12 +127,21 @@ func (l *Loader) IsSet(key string) bool {
 
 // Watch 监听配置变化
 func (l *Loader) Watch(key string, callback func(key string, value interface{})) error {
+	l.mutex.Lock()
+	if _, exists := l.watchers[key]; !exists {
+		l.watchers[key] = make([]func(string, interface{}), 0)
+	}
+	l.watchers[key] = append(l.watchers[key], callback)
+	l.mutex.Unlock()
+
+	// 监听文件变化
 	l.viper.OnConfigChange(func(in fsnotify.Event) {
 		if in.Op&fsnotify.Write == fsnotify.Write {
-			callback(key, l.Get(key))
+			l.notifyWatchers(key)
 		}
 	})
 	l.viper.WatchConfig()
+
 	return nil
 }
 
@@ -135,4 +153,17 @@ func (l *Loader) GetViper() *viper.Viper {
 // GetDuration 获取时间间隔配置
 func (l *Loader) GetDuration(key string) time.Duration {
 	return l.viper.GetDuration(key)
+}
+
+// notifyWatchers 通知监听器
+func (l *Loader) notifyWatchers(key string) {
+	l.mutex.RLock()
+	defer l.mutex.RUnlock()
+
+	if callbacks, ok := l.watchers[key]; ok {
+		value := l.Get(key)
+		for _, callback := range callbacks {
+			callback(key, value)
+		}
+	}
 }

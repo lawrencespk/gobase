@@ -21,6 +21,11 @@ func NewConfigUpdateError(message string, cause error) error {
 	return NewError(codes.ConfigUpdateError, message, cause)
 }
 
+// NewConfigLoadError 创建配置加载错误
+func NewConfigLoadError(message string, cause error) error {
+	return NewError(codes.ConfigLoadError, message, cause)
+}
+
 // NewNacosConnectError 创建Nacos连接错误
 func NewNacosConnectError(message string, cause error) error {
 	return NewError(codes.NacosConnectError, message, cause)

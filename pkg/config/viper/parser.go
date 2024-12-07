@@ -2,10 +2,14 @@ package viper
 
 import (
 	"encoding/json"
-	"fmt"
 
+	"gobase/pkg/config/types"
 	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 )
+
+// 确保 Parser 实现了 types.Parser 接口
+var _ types.Parser = (*Parser)(nil)
 
 // Parser 配置解析器
 type Parser struct {
@@ -23,27 +27,18 @@ func NewParser(loader *Loader) *Parser {
 func (p *Parser) Parse(key string, out interface{}) error {
 	data := p.loader.Get(key)
 	if data == nil {
-		return errors.NewConfigNotFoundError(
-			fmt.Sprintf("config key not found: %s", key),
-			nil,
-		)
+		return errors.NewError(codes.ConfigNotFound, "config key not found", nil)
 	}
 
 	// 将配置数据转换为JSON
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		return errors.NewConfigInvalidError(
-			fmt.Sprintf("failed to marshal config data: %s", key),
-			err,
-		)
+		return errors.NewError(codes.ConfigInvalid, "invalid config data", err)
 	}
 
 	// 解析JSON到结构体
 	if err := json.Unmarshal(jsonData, out); err != nil {
-		return errors.NewConfigInvalidError(
-			fmt.Sprintf("failed to unmarshal config data: %s", key),
-			err,
-		)
+		return errors.NewError(codes.ConfigInvalid, "invalid config format", err)
 	}
 
 	return nil

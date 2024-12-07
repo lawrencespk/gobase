@@ -124,6 +124,7 @@ const (
 	ConfigNotFound    = "2900" // 配置不存在
 	ConfigInvalid     = "2901" // 配置无效
 	ConfigUpdateError = "2902" // 配置更新错误
+	ConfigLoadError   = "2903" // 配置加载错误
 
 	// Nacos错误码 (3000-3099)
 	NacosConnectError   = "3000" // Nacos连接错误

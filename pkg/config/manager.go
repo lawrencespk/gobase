@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -9,18 +8,19 @@ import (
 	"gobase/pkg/config/types"
 	"gobase/pkg/config/viper"
 	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 )
 
 // Manager 配置管理器
 type Manager struct {
-	loader      *viper.Loader
-	parser      *viper.Parser
+	loader      types.Loader
+	parser      types.Parser
 	nacosClient *nacos.Client
 	mutex       sync.RWMutex
 	watchers    map[string][]func(string, interface{})
 }
 
-// NewManager 创建配置管理器
+// NewManager 创建配置管理器（使用Viper作为默认实现）
 func NewManager(opts ...types.ConfigOption) (*Manager, error) {
 	// 默认配置选项
 	options := &types.ConfigOptions{
@@ -36,42 +36,36 @@ func NewManager(opts ...types.ConfigOption) (*Manager, error) {
 		opt(options)
 	}
 
-	// 创建Viper加载器
-	loader := viper.NewLoader(options.ConfigFile, options.EnableEnv, options.EnvPrefix)
-	if err := loader.Load(); err != nil {
-		return nil, err
-	}
-
-	// 创建配置解析器
-	parser := viper.NewParser(loader)
-
 	// 创建配置管理器
 	m := &Manager{
-		loader:   loader,
-		parser:   parser,
 		watchers: make(map[string][]func(string, interface{})),
 	}
 
+	// 初始化loader和parser
+	if err := m.initLoaderAndParser(options); err != nil {
+		return nil, err
+	}
+
 	// 如果配置了Nacos，则初始化Nacos客户端
-	if loader.IsSet("nacos") {
+	if m.loader.IsSet("nacos") {
 		// 从配置文件读取Nacos配置
 		nacosConfig := &nacos.Config{
-			Endpoint:    loader.GetString("nacos.endpoint"),
-			NamespaceID: loader.GetString("nacos.namespace_id"),
-			Group:       loader.GetString("nacos.group"),
-			DataID:      loader.GetString("nacos.data_id"),
-			Username:    loader.GetString("nacos.username"),
-			Password:    loader.GetString("nacos.password"),
-			Timeout:     loader.GetDuration("nacos.timeout"),
-			LogDir:      loader.GetString("nacos.log_dir"),
-			CacheDir:    loader.GetString("nacos.cache_dir"),
-			LogLevel:    loader.GetString("nacos.log_level"),
-			EnableAuth:  loader.GetBool("nacos.enable_auth"),
-			AccessKey:   loader.GetString("nacos.access_key"),
-			SecretKey:   loader.GetString("nacos.secret_key"),
-			AuthToken:   loader.GetString("nacos.auth_token"),
-			IdentityKey: loader.GetString("nacos.identity_key"),
-			IdentityVal: loader.GetString("nacos.identity_val"),
+			Endpoint:    m.loader.GetString("nacos.endpoint"),
+			NamespaceID: m.loader.GetString("nacos.namespace_id"),
+			Group:       m.loader.GetString("nacos.group"),
+			DataID:      m.loader.GetString("nacos.data_id"),
+			Username:    m.loader.GetString("nacos.username"),
+			Password:    m.loader.GetString("nacos.password"),
+			Timeout:     m.loader.GetDuration("nacos.timeout"),
+			LogDir:      m.loader.GetString("nacos.log_dir"),
+			CacheDir:    m.loader.GetString("nacos.cache_dir"),
+			LogLevel:    m.loader.GetString("nacos.log_level"),
+			EnableAuth:  m.loader.GetBool("nacos.enable_auth"),
+			AccessKey:   m.loader.GetString("nacos.access_key"),
+			SecretKey:   m.loader.GetString("nacos.secret_key"),
+			AuthToken:   m.loader.GetString("nacos.auth_token"),
+			IdentityKey: m.loader.GetString("nacos.identity_key"),
+			IdentityVal: m.loader.GetString("nacos.identity_val"),
 		}
 
 		// 如果通过选项函数提供了Nacos配置，则覆盖配置文件中的值
@@ -135,6 +129,35 @@ func NewManager(opts ...types.ConfigOption) (*Manager, error) {
 	return m, nil
 }
 
+// initLoaderAndParser 初始化加载器和解析器
+func (m *Manager) initLoaderAndParser(options *types.ConfigOptions) error {
+	if options == nil {
+		return errors.NewInvalidParamsError("config options is nil", nil)
+	}
+
+	// 创建Viper加载器
+	loader := viper.NewLoader(options.ConfigFile, options.EnableEnv, options.EnvPrefix)
+	if err := loader.Load(); err != nil {
+		return errors.NewError(codes.ConfigLoadError, "failed to load config", err)
+	}
+
+	// 创建Viper解析器
+	parser := viper.NewParser(loader)
+
+	m.loader = loader
+	m.parser = parser
+	return nil
+}
+
+// NewManagerWithLoader 使用自定义加载器和解析器创建配置管理器
+func NewManagerWithLoader(loader types.Loader, parser types.Parser) *Manager {
+	return &Manager{
+		loader:   loader,
+		parser:   parser,
+		watchers: make(map[string][]func(string, interface{})),
+	}
+}
+
 // Get 获取配置值
 func (m *Manager) Get(key string) interface{} {
 	return m.loader.Get(key)
@@ -183,6 +206,15 @@ func (m *Manager) GetStringMapString(key string) map[string]string {
 // Set 设置配置值
 func (m *Manager) Set(key string, value interface{}) {
 	m.loader.Set(key, value)
+
+	// 手动触发 watchers
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	if callbacks, ok := m.watchers[key]; ok {
+		for _, cb := range callbacks {
+			cb(key, value)
+		}
+	}
 }
 
 // IsSet 检查配置是否存在
@@ -218,20 +250,37 @@ func (m *Manager) Watch(key string, callback func(key string, value interface{})
 		})
 	}
 
-	// 否则使用本地文件监听
-	return m.loader.Watch(key, callback)
+	// 否则使用本地文件监听，但使用自己的回调处理
+	return m.loader.Watch(key, func(k string, v interface{}) {
+		m.mutex.RLock()
+		defer m.mutex.RUnlock()
+		if callbacks, ok := m.watchers[k]; ok {
+			for _, cb := range callbacks {
+				cb(k, v)
+			}
+		}
+	})
 }
 
 // Close 关闭配置管理器
 func (m *Manager) Close() error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	// 清理 watchers
+	m.watchers = make(map[string][]func(string, interface{}))
+
+	// 关闭 Nacos 客户端
 	if m.nacosClient != nil {
 		if err := m.nacosClient.Close(); err != nil {
-			return errors.NewConfigUpdateError(
-				fmt.Sprintf("failed to close nacos client: %v", err),
+			return errors.NewError(
+				codes.ConfigUpdateError,
+				"failed to close nacos client",
 				err,
 			)
 		}
 	}
+
 	return nil
 }
 
