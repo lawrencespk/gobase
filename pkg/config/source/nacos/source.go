@@ -2,10 +2,9 @@ package nacos
 
 import (
 	"context"
-	"net"
-	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/nacos-group/nacos-sdk-go/clients"
 	"github.com/nacos-group/nacos-sdk-go/clients/config_client"
@@ -17,74 +16,69 @@ import (
 	"gobase/pkg/errors"
 )
 
+// Options Nacos配置源选项
+type Options struct {
+	Endpoint      string                  // Nacos服务器地址
+	NamespaceID   string                  // 命名空间ID
+	Group         string                  // 配置分组
+	DataID        string                  // 配置ID
+	Username      string                  // 用户名
+	Password      string                  // 密码
+	OnChange      func(configTypes.Event) // 配置变更回调函数
+	RetryTimes    int                     // 重试次数
+	RetryInterval time.Duration           // 重试间隔
+}
+
 // NacosSource 实现基于Nacos的配置源
 type NacosSource struct {
 	mu       sync.RWMutex
 	client   config_client.IConfigClient
-	v        *viper.Viper // 用于解析配置内容
+	v        *viper.Viper
+	opts     *Options
 	onChange func(configTypes.Event)
-
-	// Nacos特定配置
-	namespace string
-	group     string
-	dataID    string
 }
 
-// Options Nacos配置源选项
-type Options struct {
-	Endpoints  []string // 服务端点
-	Namespace  string   // 命名空间
-	Group      string   // 配置分组
-	DataID     string   // 配置ID
-	Username   string   // 用户名
-	Password   string   // 密码
-	TimeoutMs  uint64   // 超时时间(毫秒)
-	LogDir     string   // 日志目录
-	CacheDir   string   // 缓存目录
-	LogLevel   string   // 日志级别
-	Scheme     string   // 协议(http/https)
-	EnableAuth bool     // 是否启用认证
-	AccessKey  string   // 访问密钥
-	SecretKey  string   // 密钥
-	FileType   string   // 配置文件类型(yaml/json等)
+// NewSourceWithClient 使用指定的客户端创建配置源
+func NewSourceWithClient(opts *Options, client config_client.IConfigClient) (*NacosSource, error) {
+	if err := validateOptions(opts); err != nil {
+		return nil, err
+	}
+
+	return &NacosSource{
+		client:   client,
+		v:        viper.New(),
+		opts:     opts,
+		onChange: opts.OnChange,
+	}, nil
 }
 
-// New 创建Nacos配置源
-func New(opts *Options) (*NacosSource, error) {
+// NewSource 创建新的Nacos配置源
+func NewSource(opts *Options) (*NacosSource, error) {
 	if err := validateOptions(opts); err != nil {
 		return nil, err
 	}
 
 	// 创建Nacos客户端配置
 	clientConfig := constant.ClientConfig{
-		NamespaceId:         opts.Namespace,
-		TimeoutMs:           opts.TimeoutMs,
+		NamespaceId:         opts.NamespaceID,
+		TimeoutMs:           5000,
 		NotLoadCacheAtStart: true,
-		LogDir:              opts.LogDir,
-		CacheDir:            opts.CacheDir,
-		LogLevel:            opts.LogLevel,
+		LogDir:              "/tmp/nacos/log",
+		CacheDir:            "/tmp/nacos/cache",
 		Username:            opts.Username,
 		Password:            opts.Password,
-		AccessKey:           opts.AccessKey,
-		SecretKey:           opts.SecretKey,
 	}
 
-	// 创建服务端配置
-	serverConfigs := make([]constant.ServerConfig, 0, len(opts.Endpoints))
-	for _, endpoint := range opts.Endpoints {
-		host, port, err := parseEndpoint(endpoint)
-		if err != nil {
-			return nil, errors.NewConfigValidateError("invalid endpoint", err)
-		}
-		serverConfigs = append(serverConfigs, constant.ServerConfig{
-			Scheme:      opts.Scheme,
+	// 创建服务器配置
+	serverConfigs := []constant.ServerConfig{
+		{
+			IpAddr:      opts.Endpoint,
 			ContextPath: "/nacos",
-			IpAddr:      host,
-			Port:        uint64(port),
-		})
+			Port:        8848,
+		},
 	}
 
-	// 创建配置客户端
+	// 创建Nacos配置客户端
 	client, err := clients.NewConfigClient(
 		vo.NacosClientParam{
 			ClientConfig:  &clientConfig,
@@ -92,21 +86,14 @@ func New(opts *Options) (*NacosSource, error) {
 		},
 	)
 	if err != nil {
-		return nil, errors.NewConfigProviderError("failed to create nacos client", err)
-	}
-
-	// 创建viper实例用于解析配置
-	v := viper.New()
-	if opts.FileType != "" {
-		v.SetConfigType(opts.FileType)
+		return nil, errors.NewConfigError("failed to create nacos client", err)
 	}
 
 	return &NacosSource{
-		client:    client,
-		v:         v,
-		namespace: opts.Namespace,
-		group:     opts.Group,
-		dataID:    opts.DataID,
+		client:   client,
+		v:        viper.New(),
+		opts:     opts,
+		onChange: opts.OnChange,
 	}, nil
 }
 
@@ -115,10 +102,10 @@ func validateOptions(opts *Options) error {
 	if opts == nil {
 		return errors.NewConfigValidateError("options is nil", nil)
 	}
-	if len(opts.Endpoints) == 0 {
-		return errors.NewConfigValidateError("endpoints is empty", nil)
+	if opts.Endpoint == "" {
+		return errors.NewConfigValidateError("endpoint is empty", nil)
 	}
-	if opts.Namespace == "" {
+	if opts.NamespaceID == "" {
 		return errors.NewConfigValidateError("namespace is empty", nil)
 	}
 	if opts.Group == "" {
@@ -130,69 +117,60 @@ func validateOptions(opts *Options) error {
 	return nil
 }
 
-// parseEndpoint 解析端点配置
-func parseEndpoint(endpoint string) (host string, port int, err error) {
-	host, portStr, err := net.SplitHostPort(endpoint)
-	if err != nil {
-		return "", 0, err
-	}
-	port, err = strconv.Atoi(portStr)
-	if err != nil {
-		return "", 0, err
-	}
-	return host, port, nil
-}
-
 // Load 加载配置
-func (s *NacosSource) Load(ctx context.Context) (map[string]interface{}, error) {
+func (s *NacosSource) Load(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	content, err := s.client.GetConfig(vo.ConfigParam{
-		DataId: s.dataID,
-		Group:  s.group,
+		DataId: s.opts.DataID,
+		Group:  s.opts.Group,
 	})
 	if err != nil {
-		return nil, errors.NewConfigLoadError("failed to get nacos config", err)
+		return errors.NewConfigError("failed to get config from nacos", err)
 	}
 
-	// 解析配置内容
+	s.v.SetConfigType("yaml")
 	if err := s.v.ReadConfig(strings.NewReader(content)); err != nil {
-		return nil, errors.NewConfigParseError("failed to parse config content", err)
+		return errors.NewConfigError("failed to parse config", err)
 	}
 
-	return s.v.AllSettings(), nil
+	return nil
 }
 
-// Watch 监听配置变更
-func (s *NacosSource) Watch(ctx context.Context, onChange func(configTypes.Event)) error {
+// Get 获取配置值
+func (s *NacosSource) Get(key string) (interface{}, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if !s.v.IsSet(key) {
+		return nil, errors.NewConfigError("key not found", nil)
+	}
+	return s.v.Get(key), nil
+}
+
+// Watch 开始监听配置变更
+func (s *NacosSource) Watch(ctx context.Context) error {
 	s.mu.Lock()
-	s.onChange = onChange
-	s.mu.Unlock()
+	defer s.mu.Unlock()
 
 	return s.client.ListenConfig(vo.ConfigParam{
-		DataId: s.dataID,
-		Group:  s.group,
+		DataId: s.opts.DataID,
+		Group:  s.opts.Group,
 		OnChange: func(namespace, group, dataId, data string) {
-			// 获取旧配置
-			oldConfig := s.v.AllSettings()
-
-			// 解析新配置
-			if err := s.v.ReadConfig(strings.NewReader(data)); err != nil {
-				if s.onChange != nil {
-					s.onChange(configTypes.Event{
-						Key:   s.dataID,
-						Type:  configTypes.EventUpdate,
-						Error: err,
-					})
-				}
-				return
-			}
-
-			// 触发变更事件
 			if s.onChange != nil {
+				// 保存旧配置
+				oldConfig := s.v.AllSettings()
+
+				// 更新配置
+				s.v.SetConfigType("yaml")
+				if err := s.v.ReadConfig(strings.NewReader(data)); err != nil {
+					return
+				}
+
+				// 触发变更事件
 				s.onChange(configTypes.Event{
-					Key:      s.dataID,
+					Key:      dataId,
 					Value:    s.v.AllSettings(),
 					OldValue: oldConfig,
 					Type:     configTypes.EventUpdate,
@@ -207,20 +185,10 @@ func (s *NacosSource) StopWatch(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.onChange == nil {
-		return nil
-	}
-
-	err := s.client.CancelListenConfig(vo.ConfigParam{
-		DataId: s.dataID,
-		Group:  s.group,
+	return s.client.CancelListenConfig(vo.ConfigParam{
+		DataId: s.opts.DataID,
+		Group:  s.opts.Group,
 	})
-	if err != nil {
-		return errors.NewConfigWatchError("failed to cancel config listening", err)
-	}
-
-	s.onChange = nil
-	return nil
 }
 
 // Close 关闭配置源
