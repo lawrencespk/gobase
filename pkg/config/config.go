@@ -4,6 +4,8 @@ import (
 	"sync"
 
 	"github.com/spf13/viper"
+
+	"gobase/pkg/errors"
 )
 
 type Config struct {
@@ -105,6 +107,7 @@ type QueueConfig struct {
 var (
 	globalConfig *Config
 	configMu     sync.RWMutex
+	configFile   string
 )
 
 func Init() error {
@@ -135,4 +138,71 @@ func SetConfig(cfg *Config) {
 	configMu.Lock()
 	globalConfig = cfg
 	configMu.Unlock()
+}
+
+// LoadConfig 加载配置文件
+func LoadConfig() error {
+	if configFile != "" {
+		// 如果设置了具体的配置文件路径，直接使用
+		viper.SetConfigFile(configFile)
+	} else {
+		// 默认配置
+		viper.SetConfigName("config") // 配置文件名(不带扩展名)
+		viper.SetConfigType("yaml")   // 配置文件类型
+		viper.AddConfigPath("config") // 配置文件路径
+	}
+
+	if err := viper.ReadInConfig(); err != nil {
+		return errors.NewConfigError("failed to read config file", err)
+	}
+
+	config := &Config{}
+	if err := viper.Unmarshal(config); err != nil {
+		return errors.NewConfigError("failed to unmarshal config", err)
+	}
+
+	// 验证配置
+	if err := ValidateConfig(config); err != nil {
+		return err // ValidateConfig 已经返回了正确的错误类型
+	}
+
+	SetConfig(config)
+	return nil
+}
+
+// SetConfigPath 设置配置文件路径
+func SetConfigPath(path string) {
+	configFile = path
+}
+
+// ValidateConfig 验证配置
+func ValidateConfig(cfg *Config) error {
+	if len(cfg.ELK.Addresses) == 0 {
+		return errors.NewConfigError("elk addresses is empty", nil)
+	}
+	if cfg.ELK.Username == "" {
+		return errors.NewConfigError("elk username is empty", nil)
+	}
+	if cfg.ELK.Password == "" {
+		return errors.NewConfigError("elk password is empty", nil)
+	}
+	if cfg.ELK.Index == "" {
+		return errors.NewConfigError("elk index is empty", nil)
+	}
+	if cfg.ELK.Timeout <= 0 {
+		return errors.NewConfigError("elk timeout must be greater than 0", nil)
+	}
+
+	// 验证Bulk配置
+	if cfg.ELK.Bulk.BatchSize <= 0 {
+		return errors.NewConfigError("elk bulk batch size must be greater than 0", nil)
+	}
+	if cfg.ELK.Bulk.FlushBytes <= 0 {
+		return errors.NewConfigError("elk bulk flush bytes must be greater than 0", nil)
+	}
+	if cfg.ELK.Bulk.Interval == "" {
+		return errors.NewConfigError("elk bulk interval is empty", nil)
+	}
+
+	return nil
 }
