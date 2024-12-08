@@ -4,13 +4,14 @@ import (
 	"sync"
 
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 
 	"gobase/pkg/errors"
 )
 
 type Config struct {
-	ELK    ELKConfig    `mapstructure:"elk"`
-	Logger LoggerConfig `mapstructure:"logger"`
+	ELK    ELKConfig    `mapstructure:"elk" yaml:"elk"`
+	Logger LoggerConfig `mapstructure:"logger" yaml:"logger"`
 }
 
 type ELKConfig struct {
@@ -49,6 +50,7 @@ type LoggerConfig struct {
 	Elk              struct {
 		Enable bool `mapstructure:"enable"`
 	} `mapstructure:"elk"`
+	Output string `mapstructure:"output" yaml:"output"`
 }
 
 type RotationConfig struct {
@@ -205,4 +207,117 @@ func ValidateConfig(cfg *Config) error {
 	}
 
 	return nil
+}
+
+// NewConfig 创建新的配置实例并设置默认值
+func NewConfig() *Config {
+	return &Config{
+		ELK: ELKConfig{
+			Timeout: 30,
+			Bulk: BulkConfig{
+				BatchSize:  1000,
+				FlushBytes: 5 * 1024 * 1024, // 5MB
+				Interval:   "5s",
+			},
+		},
+		Logger: LoggerConfig{
+			Level:  "info",
+			Output: "console",
+		},
+	}
+}
+
+// Clone 深拷贝配置
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+
+	copied := &Config{
+		ELK: ELKConfig{
+			Addresses: make([]string, len(c.ELK.Addresses)),
+			Username:  c.ELK.Username,
+			Password:  c.ELK.Password,
+			Index:     c.ELK.Index,
+			Timeout:   c.ELK.Timeout,
+			Bulk: BulkConfig{
+				BatchSize:  c.ELK.Bulk.BatchSize,
+				FlushBytes: c.ELK.Bulk.FlushBytes,
+				Interval:   c.ELK.Bulk.Interval,
+			},
+		},
+		Logger: LoggerConfig{
+			Level:  c.Logger.Level,
+			Output: c.Logger.Output,
+		},
+	}
+
+	// 深拷贝切片
+	copy(copied.ELK.Addresses, c.ELK.Addresses)
+
+	return copied
+}
+
+// Merge 合并配置
+func (c *Config) Merge(other *Config) *Config {
+	if other == nil {
+		return c.Clone()
+	}
+
+	merged := c.Clone()
+
+	// 合并 ELK 配置
+	if len(other.ELK.Addresses) > 0 {
+		merged.ELK.Addresses = make([]string, len(other.ELK.Addresses))
+		copy(merged.ELK.Addresses, other.ELK.Addresses)
+	}
+	if other.ELK.Username != "" {
+		merged.ELK.Username = other.ELK.Username
+	}
+	if other.ELK.Password != "" {
+		merged.ELK.Password = other.ELK.Password
+	}
+	if other.ELK.Index != "" {
+		merged.ELK.Index = other.ELK.Index
+	}
+	if other.ELK.Timeout > 0 {
+		merged.ELK.Timeout = other.ELK.Timeout
+	}
+
+	// 合并 Bulk 配置
+	if other.ELK.Bulk.BatchSize > 0 {
+		merged.ELK.Bulk.BatchSize = other.ELK.Bulk.BatchSize
+	}
+	if other.ELK.Bulk.FlushBytes > 0 {
+		merged.ELK.Bulk.FlushBytes = other.ELK.Bulk.FlushBytes
+	}
+	if other.ELK.Bulk.Interval != "" {
+		merged.ELK.Bulk.Interval = other.ELK.Bulk.Interval
+	}
+
+	// 合并 Logger 配置
+	if other.Logger.Level != "" {
+		merged.Logger.Level = other.Logger.Level
+	}
+	if other.Logger.Output != "" {
+		merged.Logger.Output = other.Logger.Output
+	}
+
+	return merged
+}
+
+// MarshalYAML 序列化配置到YAML
+func MarshalYAML(cfg *Config) ([]byte, error) {
+	if cfg == nil {
+		return nil, errors.NewConfigError("config is nil", nil)
+	}
+	return yaml.Marshal(cfg)
+}
+
+// UnmarshalYAML 从YAML反序列化配置
+func UnmarshalYAML(data []byte, cfg *Config) error {
+	if cfg == nil {
+		return errors.NewConfigError("config is nil", nil)
+	}
+	return yaml.Unmarshal(data, cfg)
 }

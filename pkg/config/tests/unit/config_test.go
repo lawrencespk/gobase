@@ -115,6 +115,228 @@ func TestConfig(t *testing.T) {
 		// 恢复原配置
 		config.SetConfig(oldCfg)
 	})
+
+	// 测试默认配置
+	t.Run("DefaultConfig", func(t *testing.T) {
+		cfg := config.NewConfig()
+		assert.NotNil(t, cfg)
+
+		// 验证 ELK 默认配置
+		assert.NotNil(t, cfg.ELK)
+		assert.Equal(t, "5s", cfg.ELK.Bulk.Interval)          // 默认间隔
+		assert.Equal(t, 1000, cfg.ELK.Bulk.BatchSize)         // 默认批次大小
+		assert.Equal(t, 5*1024*1024, cfg.ELK.Bulk.FlushBytes) // 默认刷新字节数
+		assert.Equal(t, 30, cfg.ELK.Timeout)                  // 默认超时时间
+
+		// 验证 Logger 默认配置
+		assert.NotNil(t, cfg.Logger)
+		assert.Equal(t, "info", cfg.Logger.Level)
+		assert.Equal(t, "console", cfg.Logger.Output)
+	})
+
+	// 测试配置深拷贝
+	t.Run("ConfigCopy", func(t *testing.T) {
+		original := &config.Config{
+			ELK: config.ELKConfig{
+				Addresses: []string{"http://localhost:9200"},
+				Username:  "elastic",
+				Password:  "password",
+				Index:     "logs",
+				Bulk: config.BulkConfig{
+					BatchSize:  1000,
+					FlushBytes: 5242880,
+					Interval:   "5s",
+				},
+			},
+			Logger: config.LoggerConfig{
+				Level:  "debug",
+				Output: "file",
+			},
+		}
+
+		copied := original.Clone()
+
+		// 验证深拷贝后的值相等
+		assert.Equal(t, original.ELK.Addresses, copied.ELK.Addresses)
+		assert.Equal(t, original.ELK.Username, copied.ELK.Username)
+		assert.Equal(t, original.ELK.Password, copied.ELK.Password)
+		assert.Equal(t, original.ELK.Bulk.BatchSize, copied.ELK.Bulk.BatchSize)
+		assert.Equal(t, original.Logger.Level, copied.Logger.Level)
+
+		// 验证是深拷贝而非浅拷贝
+		copied.ELK.Addresses[0] = "changed"
+		assert.NotEqual(t, original.ELK.Addresses[0], copied.ELK.Addresses[0])
+
+		copied.ELK.Bulk.BatchSize = 2000
+		assert.NotEqual(t, original.ELK.Bulk.BatchSize, copied.ELK.Bulk.BatchSize)
+
+		copied.Logger.Level = "info"
+		assert.NotEqual(t, original.Logger.Level, copied.Logger.Level)
+	})
+
+	// 测试配置合并
+	t.Run("ConfigMerge", func(t *testing.T) {
+		base := &config.Config{
+			ELK: config.ELKConfig{
+				Addresses: []string{"http://localhost:9200"},
+				Username:  "elastic",
+				Index:     "logs",
+				Bulk: config.BulkConfig{
+					BatchSize: 1000,
+					Interval:  "5s",
+				},
+			},
+			Logger: config.LoggerConfig{
+				Level:  "info",
+				Output: "console",
+			},
+		}
+
+		override := &config.Config{
+			ELK: config.ELKConfig{
+				Password: "newpassword",
+				Bulk: config.BulkConfig{
+					BatchSize: 2000,
+				},
+			},
+			Logger: config.LoggerConfig{
+				Level: "debug",
+			},
+		}
+
+		merged := base.Merge(override)
+
+		// 验证保留基础配置
+		assert.Equal(t, base.ELK.Addresses[0], merged.ELK.Addresses[0])
+		assert.Equal(t, base.ELK.Username, merged.ELK.Username)
+		assert.Equal(t, base.ELK.Index, merged.ELK.Index)
+		assert.Equal(t, base.ELK.Bulk.Interval, merged.ELK.Bulk.Interval)
+		assert.Equal(t, base.Logger.Output, merged.Logger.Output)
+
+		// 验证覆盖的配置
+		assert.Equal(t, override.ELK.Password, merged.ELK.Password)
+		assert.Equal(t, override.ELK.Bulk.BatchSize, merged.ELK.Bulk.BatchSize)
+		assert.Equal(t, override.Logger.Level, merged.Logger.Level)
+
+		// 验证原配置未被修改
+		assert.NotEqual(t, base.ELK.Password, override.ELK.Password)
+		assert.NotEqual(t, base.ELK.Bulk.BatchSize, override.ELK.Bulk.BatchSize)
+		assert.NotEqual(t, base.Logger.Level, override.Logger.Level)
+	})
+
+	// 测试配置序列化和反序列化
+	t.Run("ConfigSerialization", func(t *testing.T) {
+		original := &config.Config{
+			ELK: config.ELKConfig{
+				Addresses: []string{"http://localhost:9200"},
+				Username:  "elastic",
+				Password:  "password",
+				Index:     "logs",
+				Bulk: config.BulkConfig{
+					BatchSize:  1000,
+					FlushBytes: 5242880,
+					Interval:   "5s",
+				},
+			},
+			Logger: config.LoggerConfig{
+				Level:  "debug",
+				Output: "file",
+			},
+		}
+
+		// 测试 YAML 序列化
+		yamlData, err := config.MarshalYAML(original)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, yamlData)
+
+		// 测试 YAML 反序列化
+		restored := &config.Config{}
+		err = config.UnmarshalYAML(yamlData, restored)
+		assert.NoError(t, err)
+		assert.Equal(t, original.ELK.Addresses, restored.ELK.Addresses)
+		assert.Equal(t, original.ELK.Username, restored.ELK.Username)
+		assert.Equal(t, original.ELK.Bulk.BatchSize, restored.ELK.Bulk.BatchSize)
+		assert.Equal(t, original.Logger.Level, restored.Logger.Level)
+	})
+
+	// 测试配置验证的边界情况
+	t.Run("ConfigValidationEdgeCases", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			cfg     *config.Config
+			wantErr string
+		}{
+			{
+				name: "empty addresses but with other valid fields",
+				cfg: &config.Config{
+					ELK: config.ELKConfig{
+						Username: "elastic",
+						Password: "password",
+						Index:    "logs",
+						Timeout:  30,
+					},
+				},
+				wantErr: "elk addresses is empty",
+			},
+			{
+				name: "invalid timeout value",
+				cfg: &config.Config{
+					ELK: config.ELKConfig{
+						Addresses: []string{"http://localhost:9200"},
+						Username:  "elastic",
+						Password:  "password",
+						Index:     "logs",
+						Timeout:   0,
+					},
+				},
+				wantErr: "elk timeout must be greater than 0",
+			},
+			{
+				name: "invalid bulk batch size",
+				cfg: &config.Config{
+					ELK: config.ELKConfig{
+						Addresses: []string{"http://localhost:9200"},
+						Username:  "elastic",
+						Password:  "password",
+						Index:     "logs",
+						Timeout:   30,
+						Bulk: config.BulkConfig{
+							BatchSize:  -1,
+							FlushBytes: 5242880,
+							Interval:   "5s",
+						},
+					},
+				},
+				wantErr: "elk bulk batch size must be greater than 0",
+			},
+			{
+				name: "invalid bulk flush bytes",
+				cfg: &config.Config{
+					ELK: config.ELKConfig{
+						Addresses: []string{"http://localhost:9200"},
+						Username:  "elastic",
+						Password:  "password",
+						Index:     "logs",
+						Timeout:   30,
+						Bulk: config.BulkConfig{
+							BatchSize:  1000,
+							FlushBytes: 0,
+							Interval:   "5s",
+						},
+					},
+				},
+				wantErr: "elk bulk flush bytes must be greater than 0",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				err := config.ValidateConfig(tt.cfg)
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			})
+		}
+	})
 }
 
 // 测试辅助函数
