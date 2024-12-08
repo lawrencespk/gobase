@@ -11,6 +11,12 @@ import (
 	"gobase/pkg/errors"
 )
 
+// Options 本地配置源选项
+type Options struct {
+	Path     string                  // 配置文件路径
+	OnChange func(configTypes.Event) // 配置变更回调函数
+}
+
 // LocalSource 实现基于本地文件的配置源
 type LocalSource struct {
 	mu       sync.RWMutex
@@ -19,76 +25,60 @@ type LocalSource struct {
 	onChange func(configTypes.Event)
 }
 
-// Options 本地配置源选项
-type Options struct {
-	FilePath string                 // 配置文件路径
-	FileType string                 // 配置文件类型(yaml/json等)
-	Defaults map[string]interface{} // 默认值
-}
-
-// New 创建本地配置源
-func New(opts *Options) (*LocalSource, error) {
-	if opts == nil || opts.FilePath == "" {
-		return nil, errors.NewConfigValidateError("file path is required", nil)
+// NewSource 创建新的本地配置源
+func NewSource(opts *Options) (*LocalSource, error) {
+	if opts == nil || opts.Path == "" {
+		return nil, errors.NewConfigError("invalid options", nil)
 	}
 
-	// 创建viper实例
-	v := viper.New()
-	v.SetConfigFile(opts.FilePath)
-	if opts.FileType != "" {
-		v.SetConfigType(opts.FileType)
+	s := &LocalSource{
+		v:        viper.New(),
+		filePath: opts.Path,
+		onChange: opts.OnChange,
 	}
 
-	// 设置默认值
-	if opts.Defaults != nil {
-		for k, val := range opts.Defaults {
-			v.SetDefault(k, val)
-		}
-	}
-
-	return &LocalSource{
-		v:        v,
-		filePath: opts.FilePath,
-	}, nil
+	s.v.SetConfigFile(opts.Path)
+	return s, nil
 }
 
 // Load 加载配置
-func (s *LocalSource) Load(ctx context.Context) (map[string]interface{}, error) {
+func (s *LocalSource) Load(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if err := s.v.ReadInConfig(); err != nil {
-		return nil, errors.NewConfigLoadError("failed to read config file", err)
+		return errors.NewConfigError("failed to read config", err)
 	}
-
-	return s.v.AllSettings(), nil
+	return nil
 }
 
-// Watch 监听配置变更
-func (s *LocalSource) Watch(ctx context.Context, onChange func(configTypes.Event)) error {
+// Get 获取配置值
+func (s *LocalSource) Get(key string) (interface{}, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if !s.v.IsSet(key) {
+		return nil, errors.NewConfigError("key not found", nil)
+	}
+	return s.v.Get(key), nil
+}
+
+// Watch 开始监听配置变更
+func (s *LocalSource) Watch(ctx context.Context) error {
 	s.mu.Lock()
-	s.onChange = onChange
-	s.mu.Unlock()
+	defer s.mu.Unlock()
 
-	// 监听文件变更
 	s.v.OnConfigChange(func(in fsnotify.Event) {
-		// 获取旧配置
-		oldConfig := s.v.AllSettings()
-
-		// 重新加载配置
-		if err := s.v.ReadInConfig(); err != nil {
-			if s.onChange != nil {
-				s.onChange(configTypes.Event{
-					Key:   s.filePath,
-					Type:  configTypes.EventUpdate,
-					Error: err,
-				})
-			}
-			return
-		}
-
-		// 触发变更事件
 		if s.onChange != nil {
+			// 保存旧配置
+			oldConfig := s.v.AllSettings()
+
+			// 重新加载配置
+			if err := s.v.ReadInConfig(); err != nil {
+				return
+			}
+
+			// 触发变更事件
 			s.onChange(configTypes.Event{
 				Key:      s.filePath,
 				Value:    s.v.AllSettings(),
