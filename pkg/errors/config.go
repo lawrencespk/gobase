@@ -75,3 +75,43 @@ func NewNacosTimeoutError(message string, cause error) error {
 func NewNacosOperationError(message string, cause error) error {
 	return NewError(codes.NacosOperationError, message, cause)
 }
+
+// NewConfigParseError 创建配置解析错误
+func NewConfigParseError(message string, cause error) error {
+	return NewError(codes.ConfigParseError, message, cause)
+}
+
+// NewConfigWatchError 创建配置监听错误
+func NewConfigWatchError(message string, cause error) error {
+	return NewError(codes.ConfigWatchError, message, cause)
+}
+
+// NewConfigValidateError 创建配置验证错误
+func NewConfigValidateError(message string, cause error) error {
+	return NewError(codes.ConfigValidateError, message, cause)
+}
+
+// NewConfigTypeError 创建配置类型错误
+func NewConfigTypeError(message string, cause error) error {
+	return NewError(codes.ConfigTypeError, message, cause)
+}
+
+// NewConfigProviderError 创建配置提供者错误
+func NewConfigProviderError(message string, cause error) error {
+	return NewError(codes.ConfigProviderError, message, cause)
+}
+
+// NewConfigCloseError 创建配置关闭错误
+func NewConfigCloseError(message string, cause error) error {
+	return NewError(codes.ConfigCloseError, message, cause)
+}
+
+// NewConfigKeyNotFoundError 创建配置键不存在错误
+func NewConfigKeyNotFoundError(message string, cause error) error {
+	return NewError(codes.ConfigKeyNotFoundError, message, cause)
+}
+
+// NewConfigNotLoadedError 创建配置未加载错误
+func NewConfigNotLoadedError(message string, cause error) error {
+	return NewError(codes.ConfigNotLoadedError, message, cause)
+}

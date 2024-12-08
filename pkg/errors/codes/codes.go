@@ -121,10 +121,18 @@ const (
 	DBDeadlockError    = "2803" // 数据库死锁错误
 
 	// 配置相关错误码 (2900-2999)
-	ConfigNotFound    = "2900" // 配置不存在
-	ConfigInvalid     = "2901" // 配置无效
-	ConfigUpdateError = "2902" // 配置更新错误
-	ConfigLoadError   = "2903" // 配置加载错误
+	ConfigNotFound         = "2900" // 配置不存在
+	ConfigInvalid          = "2901" // 配置无效
+	ConfigUpdateError      = "2902" // 配置更新错误
+	ConfigLoadError        = "2903" // 配置加载错误
+	ConfigParseError       = "2904" // 配置解析错误
+	ConfigWatchError       = "2905" // 配置监听错误
+	ConfigValidateError    = "2906" // 配置验证错误
+	ConfigTypeError        = "2907" // 配置类型错误
+	ConfigProviderError    = "2908" // 配置提供者错误
+	ConfigCloseError       = "2909" // 配置关闭错误
+	ConfigKeyNotFoundError = "2910" // 配置键不存在错误
+	ConfigNotLoadedError   = "2911" // 配置未加载错误
 
 	// Nacos错误码 (3000-3099)
 	NacosConnectError   = "3000" // Nacos连接错误
