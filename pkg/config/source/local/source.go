@@ -13,8 +13,9 @@ import (
 
 // Options 本地配置源选项
 type Options struct {
-	Path     string                  // 配置文件路径
-	OnChange func(configTypes.Event) // 配置变更回调函数
+	Path           string                             // 配置文件路径
+	OnChange       func(configTypes.Event)            // 配置变更回调函数
+	ValidateConfig func(map[string]interface{}) error // 配置验证函数
 }
 
 // LocalSource 实现基于本地文件的配置源
@@ -23,6 +24,7 @@ type LocalSource struct {
 	v        *viper.Viper
 	filePath string
 	onChange func(configTypes.Event)
+	opts     *Options
 }
 
 // NewSource 创建新的本地配置源
@@ -35,6 +37,7 @@ func NewSource(opts *Options) (*LocalSource, error) {
 		v:        viper.New(),
 		filePath: opts.Path,
 		onChange: opts.OnChange,
+		opts:     opts,
 	}
 
 	s.v.SetConfigFile(opts.Path)
@@ -49,6 +52,15 @@ func (s *LocalSource) Load(ctx context.Context) error {
 	if err := s.v.ReadInConfig(); err != nil {
 		return errors.NewConfigError("failed to read config", err)
 	}
+
+	// 如果设置了验证函数，执行验证
+	if s.opts.ValidateConfig != nil {
+		if err := s.opts.ValidateConfig(s.v.AllSettings()); err != nil {
+			// 直接返回验证错误
+			return errors.NewConfigError("validation failed", err)
+		}
+	}
+
 	return nil
 }
 
