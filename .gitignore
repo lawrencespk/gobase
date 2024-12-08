@@ -43,3 +43,6 @@ Thumbs.db
 # Config files
 /configs/config.yaml
 /configs/*.local.yaml
+
+# gz files
+*.gz
