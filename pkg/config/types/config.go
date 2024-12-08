@@ -4,23 +4,20 @@ import "time"
 
 // NacosConfig Nacos配置
 type NacosConfig struct {
-	Endpoint    string        // 服务端点
-	NamespaceID string        // 命名空间ID
-	Group       string        // 配置分组
-	DataID      string        // 配置ID
-	Username    string        // 用户名
-	Password    string        // 密码
-	Timeout     time.Duration // 超时时间
-	LogDir      string        // 日志目录
-	CacheDir    string        // 缓存目录
-	LogLevel    string        // 日志级别
-	// 认证相关
-	AccessKey   string // AccessKey
-	SecretKey   string // SecretKey
-	EnableAuth  bool   // 是否启用认证
-	AuthToken   string // 认证Token
-	IdentityKey string // 身份Key
-	IdentityVal string // 身份Value
+	Endpoints  []string `mapstructure:"endpoints"`   // 服务端点列表
+	Namespace  string   `mapstructure:"namespace"`   // 命名空间
+	Group      string   `mapstructure:"group"`       // 配置分组
+	DataID     string   `mapstructure:"data_id"`     // 配置ID
+	Username   string   `mapstructure:"username"`    // 用户名
+	Password   string   `mapstructure:"password"`    // 密码
+	TimeoutMs  int      `mapstructure:"timeout_ms"`  // 超时时间(毫秒)
+	LogDir     string   `mapstructure:"log_dir"`     // 日志目录
+	CacheDir   string   `mapstructure:"cache_dir"`   // 缓存目录
+	LogLevel   string   `mapstructure:"log_level"`   // 日志级别
+	Scheme     string   `mapstructure:"scheme"`      // 协议
+	EnableAuth bool     `mapstructure:"enable_auth"` // 是否启用认证
+	AccessKey  string   `mapstructure:"access_key"`  // 访问密钥
+	SecretKey  string   `mapstructure:"secret_key"`  // 密钥
 }
 
 // ConfigOptions 配置选项
@@ -84,7 +81,10 @@ func WithNacosEndpoint(endpoint string) ConfigOption {
 		if o.NacosConfig == nil {
 			o.NacosConfig = &NacosConfig{}
 		}
-		o.NacosConfig.Endpoint = endpoint
+		if o.NacosConfig.Endpoints == nil {
+			o.NacosConfig.Endpoints = make([]string, 0, 1)
+		}
+		o.NacosConfig.Endpoints = append(o.NacosConfig.Endpoints, endpoint)
 	}
 }
 
@@ -94,7 +94,7 @@ func WithNacosNamespace(namespace string) ConfigOption {
 		if o.NacosConfig == nil {
 			o.NacosConfig = &NacosConfig{}
 		}
-		o.NacosConfig.NamespaceID = namespace
+		o.NacosConfig.Namespace = namespace
 	}
 }
 
@@ -135,6 +135,6 @@ func WithNacosTimeout(timeout time.Duration) ConfigOption {
 		if o.NacosConfig == nil {
 			o.NacosConfig = &NacosConfig{}
 		}
-		o.NacosConfig.Timeout = timeout
+		o.NacosConfig.TimeoutMs = int(timeout.Milliseconds())
 	}
 }

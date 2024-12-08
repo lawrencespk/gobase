@@ -5,8 +5,9 @@ import (
 
 	"gobase/pkg/errors"
 
-	"github.com/nacos-group/nacos-sdk-go/model"
-	"github.com/nacos-group/nacos-sdk-go/vo"
+	"github.com/nacos-group/nacos-sdk-go/v2/model"
+	"github.com/nacos-group/nacos-sdk-go/v2/vo"
+	"github.com/stretchr/testify/mock"
 )
 
 // MockConfigClient 模拟Nacos配置客户端
@@ -15,6 +16,7 @@ type MockConfigClient struct {
 	configs  map[string]string
 	watches  map[string]func(namespace, group, dataId, data string)
 	hasError bool
+	mock.Mock
 }
 
 // NewMockConfigClient 创建新的mock客户端
@@ -41,10 +43,12 @@ func (m *MockConfigClient) GetConfig(param vo.ConfigParam) (string, error) {
 		return "", errors.NewConfigError("mock error", nil)
 	}
 
-	if content, ok := m.configs[param.DataId]; ok {
-		return content, nil
+	content, ok := m.configs[param.DataId]
+	if !ok {
+		return "", errors.NewConfigError("config not found", nil)
 	}
-	return "", errors.NewConfigError("config not found", nil)
+
+	return content, nil
 }
 
 // PublishConfig 发布配置
@@ -59,7 +63,7 @@ func (m *MockConfigClient) PublishConfig(param vo.ConfigParam) (bool, error) {
 	m.configs[param.DataId] = param.Content
 
 	if watch, ok := m.watches[param.DataId]; ok {
-		watch("", param.Group, param.DataId, param.Content)
+		go watch("", param.Group, param.DataId, param.Content)
 	}
 	return true, nil
 }
@@ -88,6 +92,10 @@ func (m *MockConfigClient) SetConfig(dataId string, content string) {
 	defer m.mu.Unlock()
 
 	m.configs[dataId] = content
+
+	if watch, ok := m.watches[dataId]; ok {
+		go watch("", "", dataId, content)
+	}
 }
 
 // DeleteConfig 删除配置
@@ -115,4 +123,9 @@ func (m *MockConfigClient) SearchConfig(param vo.SearchConfigParam) (*model.Conf
 		TotalCount: 0,
 		PageItems:  []model.ConfigItem{},
 	}, nil
+}
+
+// CloseClient 实现关闭方法
+func (m *MockConfigClient) CloseClient() {
+	m.Called()
 }
