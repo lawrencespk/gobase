@@ -10,3 +10,6 @@
 ### 3. Recovery 中间件
 [Recovery 中间件文档](/pkg/middleware/recovery/README.md)
 
+### 4. 配置系统
+[配置系统文档](/pkg/config/README.md)
+
