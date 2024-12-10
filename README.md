@@ -13,3 +13,8 @@
 ### 4. 配置系统
 [配置系统文档](/pkg/config/README.md)
 
+### 5. 请求ID生成器
+[请求ID生成器文档](/pkg/utils/requestid/README.md)
+
+### 6. 上下文
+[上下文文档](/pkg/context/README.md)
