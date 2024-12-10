@@ -18,3 +18,7 @@
 
 ### 6. 上下文
 [上下文文档](/pkg/context/README.md)
+
+### 7. Context 中间件
+[Context 中间件文档](/pkg/middleware/context/README.md)
+
