@@ -5,45 +5,67 @@ import (
 	"time"
 )
 
-// Context 扩展标准库的 context.Context 接口
+// Context 定义了自定义上下文接口
 type Context interface {
-	context.Context // 继承标准库的 Context 接口
+	context.Context // 继承标准库context.Context接口
 
-	// 元数据相关
-	SetMetadata(key string, value interface{})  // 设置元数据
-	GetMetadata(key string) (interface{}, bool) // 获取元数据
-	Metadata() map[string]interface{}           // 获取所有元数据
-	DeleteMetadata(key string)                  // 删除元数据
-	SetMetadataMap(data map[string]interface{}) // 设置多个元数据
+	// 元数据操作
+	GetMetadata() map[string]interface{}
+	SetMetadata(metadata map[string]interface{})
+	GetValue(key string) interface{}
+	SetValue(key string, value interface{})
+	DeleteMetadata(key string)
+	Metadata() map[string]interface{}
 
-	// 用户信息相关
-	SetUserID(userID string)     // 设置用户ID
-	GetUserID() string           // 获取用户ID
-	SetUserName(userName string) // 设置用户名
-	GetUserName() string         // 获取用户名
+	// 用户信息
+	GetUserID() string
+	SetUserID(userID string)
+	GetUserName() string
+	SetUserName(userName string)
 
-	// 请求相关
-	SetRequestID(requestID string) // 设置请求ID
-	GetRequestID() string          // 获取请求ID
-	SetClientIP(clientIP string)   // 设置客户端IP
-	GetClientIP() string           // 获取客户端IP
+	// 请求信息
+	GetRequestID() string
+	SetRequestID(requestID string)
+	GetClientIP() string
+	SetClientIP(clientIP string)
 
-	// 追踪相关
-	SetTraceID(traceID string) // 设置追踪ID
-	GetTraceID() string        // 获取追踪ID
-	SetSpanID(spanID string)   // 设置SpanID
-	GetSpanID() string         // 获取SpanID
-
-	// 超时控制
-	WithTimeout(timeout time.Duration) (Context, context.CancelFunc) // 设置超时时间
-	WithDeadline(deadline time.Time) (Context, context.CancelFunc)   // 设置截止时间
-	WithCancel() (Context, context.CancelFunc)                       // 创建一个可取消的上下文
+	// 追踪信息
+	GetTraceID() string
+	SetTraceID(traceID string)
+	GetSpanID() string
+	SetSpanID(spanID string)
 
 	// 错误处理
-	SetError(err error) // 设置错误信息
-	GetError() error    // 获取错误信息
-	HasError() bool     // 检查是否存在错误
+	GetError() error
+	SetError(err error)
 
-	// 克隆当前上下文
+	// 上下文控制
+	WithCancel() (Context, context.CancelFunc)
+	WithTimeout(timeout time.Duration) (Context, context.CancelFunc)
+	WithDeadline(deadline time.Time) (Context, context.CancelFunc)
+
+	// 克隆
 	Clone() Context
+
+	// 删除值
+	DeleteValue(key string)
+}
+
+// NewBaseContext 定义创建基础上下文的函数类型
+type NewBaseContext func(context.Context) Context
+
+var (
+	// DefaultNewContext 默认的上下文创建函数
+	DefaultNewContext NewBaseContext
+)
+
+// NewContext 创建新的上下文
+func NewContext(parent context.Context) Context {
+	if DefaultNewContext == nil {
+		panic("DefaultNewContext not set")
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+	return DefaultNewContext(parent)
 }

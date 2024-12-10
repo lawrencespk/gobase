@@ -2,65 +2,29 @@ package context
 
 import (
 	"context"
-	"sync"
-	"time"
-
 	"gobase/pkg/context/types"
+	"time"
 )
 
-// baseContext 实现 types.Context 接口
-type baseContext struct {
-	context.Context
-	metadata map[string]interface{}
-	mu       sync.RWMutex
-}
-
-// NewContext 创建一个新的 Context
-func NewContext(ctx context.Context) types.Context {
-	if ctx == nil {
-		ctx = context.Background()
+// GetUserID 获取用户ID
+func (c *Context) GetUserID() string {
+	if val := c.GetValue(KeyUserID); val != nil {
+		if s, ok := val.(string); ok {
+			return s
+		}
 	}
-	return &baseContext{
-		Context:  ctx,
-		metadata: make(map[string]interface{}),
-	}
-}
-
-// SetMetadata 设置元数据
-func (c *baseContext) SetMetadata(key string, value interface{}) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.metadata[key] = value
-}
-
-// GetMetadata 获取元数据
-func (c *baseContext) GetMetadata(key string) (interface{}, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	value, ok := c.metadata[key]
-	return value, ok
-}
-
-// Metadata 获取所有元数据
-func (c *baseContext) Metadata() map[string]interface{} {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	metadata := make(map[string]interface{}, len(c.metadata))
-	for k, v := range c.metadata {
-		metadata[k] = v
-	}
-	return metadata
+	return ""
 }
 
 // SetUserID 设置用户ID
-func (c *baseContext) SetUserID(userID string) {
-	c.SetMetadata(types.KeyUserID, userID)
+func (c *Context) SetUserID(userID string) {
+	c.SetValue(KeyUserID, userID)
 }
 
-// GetUserID 获取用户ID
-func (c *baseContext) GetUserID() string {
-	if v, ok := c.GetMetadata(types.KeyUserID); ok {
-		if s, ok := v.(string); ok {
+// GetUserName 获取用户名
+func (c *Context) GetUserName() string {
+	if val := c.GetValue(KeyUserName); val != nil {
+		if s, ok := val.(string); ok {
 			return s
 		}
 	}
@@ -68,14 +32,14 @@ func (c *baseContext) GetUserID() string {
 }
 
 // SetUserName 设置用户名
-func (c *baseContext) SetUserName(userName string) {
-	c.SetMetadata(types.KeyUserName, userName)
+func (c *Context) SetUserName(userName string) {
+	c.SetValue(KeyUserName, userName)
 }
 
-// GetUserName 获取用户名
-func (c *baseContext) GetUserName() string {
-	if v, ok := c.GetMetadata(types.KeyUserName); ok {
-		if s, ok := v.(string); ok {
+// GetRequestID 获取请求ID
+func (c *Context) GetRequestID() string {
+	if val := c.GetValue(KeyRequestID); val != nil {
+		if s, ok := val.(string); ok {
 			return s
 		}
 	}
@@ -83,14 +47,14 @@ func (c *baseContext) GetUserName() string {
 }
 
 // SetRequestID 设置请求ID
-func (c *baseContext) SetRequestID(requestID string) {
-	c.SetMetadata(types.KeyRequestID, requestID)
+func (c *Context) SetRequestID(requestID string) {
+	c.SetValue(KeyRequestID, requestID)
 }
 
-// GetRequestID 获取请求ID
-func (c *baseContext) GetRequestID() string {
-	if v, ok := c.GetMetadata(types.KeyRequestID); ok {
-		if s, ok := v.(string); ok {
+// GetClientIP 获取客户端IP
+func (c *Context) GetClientIP() string {
+	if val := c.GetValue(KeyClientIP); val != nil {
+		if s, ok := val.(string); ok {
 			return s
 		}
 	}
@@ -98,14 +62,14 @@ func (c *baseContext) GetRequestID() string {
 }
 
 // SetClientIP 设置客户端IP
-func (c *baseContext) SetClientIP(clientIP string) {
-	c.SetMetadata(types.KeyClientIP, clientIP)
+func (c *Context) SetClientIP(clientIP string) {
+	c.SetValue(KeyClientIP, clientIP)
 }
 
-// GetClientIP 获取客户端IP
-func (c *baseContext) GetClientIP() string {
-	if v, ok := c.GetMetadata(types.KeyClientIP); ok {
-		if s, ok := v.(string); ok {
+// GetTraceID 获取追踪ID
+func (c *Context) GetTraceID() string {
+	if val := c.GetValue(KeyTraceID); val != nil {
+		if s, ok := val.(string); ok {
 			return s
 		}
 	}
@@ -113,108 +77,60 @@ func (c *baseContext) GetClientIP() string {
 }
 
 // SetTraceID 设置追踪ID
-func (c *baseContext) SetTraceID(traceID string) {
-	c.SetMetadata(types.KeyTraceID, traceID)
+func (c *Context) SetTraceID(traceID string) {
+	c.SetValue(KeyTraceID, traceID)
 }
 
-// GetTraceID 获取追踪ID
-func (c *baseContext) GetTraceID() string {
-	if v, ok := c.GetMetadata(types.KeyTraceID); ok {
-		if s, ok := v.(string); ok {
+// GetSpanID 获取跨度ID
+func (c *Context) GetSpanID() string {
+	if val := c.GetValue(KeySpanID); val != nil {
+		if s, ok := val.(string); ok {
 			return s
 		}
 	}
 	return ""
 }
 
-// SetSpanID 设置Span ID
-func (c *baseContext) SetSpanID(spanID string) {
-	c.SetMetadata(types.KeySpanID, spanID)
-}
-
-// GetSpanID 获取Span ID
-func (c *baseContext) GetSpanID() string {
-	if v, ok := c.GetMetadata(types.KeySpanID); ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-	return ""
-}
-
-// WithTimeout 创建一个带超时的新上下文
-func (c *baseContext) WithTimeout(timeout time.Duration) (types.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(c.Context, timeout)
-	return &baseContext{
-		Context:  ctx,
-		metadata: c.Metadata(), // 复制元数据
-	}, cancel
-}
-
-// WithDeadline 创建一个带截止时间的新上下文
-func (c *baseContext) WithDeadline(deadline time.Time) (types.Context, context.CancelFunc) {
-	ctx, cancel := context.WithDeadline(c.Context, deadline)
-	return &baseContext{
-		Context:  ctx,
-		metadata: c.Metadata(), // 复制元数据
-	}, cancel
-}
-
-// WithCancel 创建一个可取消的新上下文
-func (c *baseContext) WithCancel() (types.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(c.Context)
-	return &baseContext{
-		Context:  ctx,
-		metadata: c.Metadata(), // 复制元数据
-	}, cancel
-}
-
-// Clone 克隆当前上下文
-func (c *baseContext) Clone() types.Context {
-	return &baseContext{
-		Context:  c.Context,
-		metadata: c.Metadata(), // 复制元数据
-	}
-}
-
-// DeleteMetadata 删除元数据
-func (c *baseContext) DeleteMetadata(key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.metadata, key)
-}
-
-// SetMetadataMap 设置多个元数据
-func (c *baseContext) SetMetadataMap(data map[string]interface{}) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for k, v := range data {
-		c.metadata[k] = v
-	}
-}
-
-// SetError 设置错误信息
-func (c *baseContext) SetError(err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if err == nil {
-		delete(c.metadata, types.KeyError) // 当 err 为 nil 时，删除错误
-	} else {
-		c.metadata[types.KeyError] = err
-	}
+// SetSpanID 设置跨度ID
+func (c *Context) SetSpanID(spanID string) {
+	c.SetValue(KeySpanID, spanID)
 }
 
 // GetError 获取错误信息
-func (c *baseContext) GetError() error {
-	if v, ok := c.GetMetadata(types.KeyError); ok {
-		if err, ok := v.(error); ok {
+func (c *Context) GetError() error {
+	if val := c.GetValue(KeyError); val != nil {
+		if err, ok := val.(error); ok {
 			return err
 		}
 	}
 	return nil
 }
 
-// HasError 检查是否存在错误
-func (c *baseContext) HasError() bool {
-	return c.GetError() != nil
+// SetError 设置错误信息
+func (c *Context) SetError(err error) {
+	c.SetValue(KeyError, err)
+}
+
+// WithCancel 创建可取消的上下文
+func (c *Context) WithCancel() (types.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(c.Context)
+	newCtx := c.Clone()
+	newCtx.(*Context).Context = ctx
+	return newCtx, cancel
+}
+
+// WithTimeout 创建带超时的上下文
+func (c *Context) WithTimeout(timeout time.Duration) (types.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(c.Context, timeout)
+	newCtx := c.Clone()
+	newCtx.(*Context).Context = ctx
+	return newCtx, cancel
+}
+
+// WithDeadline 创建带截止时间的上下文
+func (c *Context) WithDeadline(deadline time.Time) (types.Context, context.CancelFunc) {
+	ctx, cancel := context.WithDeadline(c.Context, deadline)
+	newCtx := c.Clone()
+	newCtx.(*Context).Context = ctx
+	return newCtx, cancel
 }

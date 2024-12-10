@@ -7,15 +7,12 @@ import (
 
 // GetContextValue 从上下文中获取值
 func GetContextValue(ctx types.Context, key string) interface{} {
-	if v, ok := ctx.GetMetadata(key); ok {
-		return v
-	}
-	return ctx.Value(key)
+	return ctx.GetValue(key)
 }
 
 // SetContextValue 设置上下文值
 func SetContextValue(ctx types.Context, key string, value interface{}) {
-	ctx.SetMetadata(key, value)
+	ctx.SetValue(key, value)
 }
 
 // GetUserID 获取用户ID
@@ -50,7 +47,7 @@ func GetSpanID(ctx types.Context) string {
 
 // GetStringValue 获取字符串值
 func GetStringValue(ctx types.Context, key string) (string, bool) {
-	if v, ok := ctx.GetMetadata(key); ok {
+	if v := ctx.GetValue(key); v != nil {
 		if s, ok := v.(string); ok {
 			return s, true
 		}
@@ -60,7 +57,7 @@ func GetStringValue(ctx types.Context, key string) (string, bool) {
 
 // GetIntValue 获取整数值
 func GetIntValue(ctx types.Context, key string) (int, bool) {
-	if v, ok := ctx.GetMetadata(key); ok {
+	if v := ctx.GetValue(key); v != nil {
 		if i, ok := v.(int); ok {
 			return i, true
 		}
@@ -70,7 +67,7 @@ func GetIntValue(ctx types.Context, key string) (int, bool) {
 
 // GetBoolValue 获取布尔值
 func GetBoolValue(ctx types.Context, key string) (bool, bool) {
-	if v, ok := ctx.GetMetadata(key); ok {
+	if v := ctx.GetValue(key); v != nil {
 		if b, ok := v.(bool); ok {
 			return b, true
 		}
@@ -80,7 +77,7 @@ func GetBoolValue(ctx types.Context, key string) (bool, bool) {
 
 // GetFloat64Value 获取float64值
 func GetFloat64Value(ctx types.Context, key string) (float64, bool) {
-	if v, ok := ctx.GetMetadata(key); ok {
+	if v := ctx.GetValue(key); v != nil {
 		if f, ok := v.(float64); ok {
 			return f, true
 		}
@@ -90,7 +87,7 @@ func GetFloat64Value(ctx types.Context, key string) (float64, bool) {
 
 // GetTimeValue 获取时间值
 func GetTimeValue(ctx types.Context, key string) (time.Time, bool) {
-	if v, ok := ctx.GetMetadata(key); ok {
+	if v := ctx.GetValue(key); v != nil {
 		if t, ok := v.(time.Time); ok {
 			return t, true
 		}
@@ -105,5 +102,5 @@ func GetError(ctx types.Context) error {
 
 // HasError 检查是否存在错误
 func HasError(ctx types.Context) bool {
-	return ctx.HasError()
+	return ctx.GetError() != nil
 }
