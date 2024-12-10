@@ -93,6 +93,27 @@ type SnowflakeGenerator struct {
 	sequence      int64
 }
 
+// SetLastTimestamp 仅用于测试
+func (g *SnowflakeGenerator) SetLastTimestamp(timestamp int64) {
+	g.mutex.Lock()
+	defer g.mutex.Unlock()
+	g.lastTimestamp = timestamp
+}
+
+// ResetLastTimestamp 重置最后时间戳（仅用于测试）
+func (g *SnowflakeGenerator) ResetLastTimestamp() {
+	g.mutex.Lock()
+	defer g.mutex.Unlock()
+	g.lastTimestamp = time.Now().UnixNano() / 1000000
+}
+
+// GetLastTimestamp 仅用于测试
+func (g *SnowflakeGenerator) GetLastTimestamp() int64 {
+	g.mutex.Lock()
+	defer g.mutex.Unlock()
+	return g.lastTimestamp
+}
+
 // NewSnowflakeGenerator 创建Snowflake生成器
 func NewSnowflakeGenerator(opts *Options) *SnowflakeGenerator {
 	return &SnowflakeGenerator{
