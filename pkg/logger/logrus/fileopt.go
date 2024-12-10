@@ -2,7 +2,11 @@ package logrus
 
 import (
 	"bytes"
+	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -22,11 +26,12 @@ type FileOptions struct {
 
 // FileManager 文件管理器
 type FileManager struct {
-	opts   FileOptions            // 配置
-	files  map[string]*FileHandle // 文件句柄映射
-	mu     sync.RWMutex           // 读写锁
-	pool   *BufferPool            // 缓冲池
-	writes *WritePool             // 写入器池
+	mu          sync.RWMutex           // 读写锁
+	opts        FileOptions            // 配置
+	currentFile *os.File               // 当前文件
+	files       map[string]*FileHandle // 文件句柄映射
+	pool        *BufferPool            // 缓冲池
+	writes      *WritePool             // 写入器池
 }
 
 // FileHandle 文件句柄
@@ -116,38 +121,47 @@ func (fm *FileManager) flushHandle(handle *FileHandle) error {
 
 // getHandle 获取文件句柄
 func (fm *FileManager) getHandle(filename string) (*FileHandle, error) {
-	fm.mu.RLock()                    // 锁定
-	handle, ok := fm.files[filename] // 获取文件句柄
-	fm.mu.RUnlock()                  // 解锁
-
-	if ok {
-		return handle, nil // 如果文件句柄存在，返回文件句柄
-	}
-
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
 
-	// 双重检查
-	if handle, ok = fm.files[filename]; ok {
+	// 检查是否已存在句柄
+	if handle, exists := fm.files[filename]; exists {
 		return handle, nil
 	}
 
-	// 检查是否超过最大打开文件数
-	if len(fm.files) >= fm.opts.MaxOpenFiles {
-		fm.closeIdleFiles() // 关闭空闲文件
+	// Windows 系统特殊处理
+	fileMode := os.FileMode(0644)
+	if runtime.GOOS == "windows" {
+		fileMode = 0666
 	}
 
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	// 确保目录存在
+	if err := os.MkdirAll(filepath.Dir(filename), fileMode); err != nil {
+		return nil, errors.NewFileOperationError("创建目录失败", err)
+	}
+
+	// 打开文件
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, fileMode)
 	if err != nil {
-		return nil, errors.NewFileOpenError("打开文件失败", err)
+		// Windows 权限处理
+		if os.IsPermission(err) && runtime.GOOS == "windows" {
+			cmd := exec.Command("icacls", filename, "/grant", "Everyone:F")
+			if cmdErr := cmd.Run(); cmdErr == nil {
+				file, err = os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, fileMode)
+			}
+		}
+		if err != nil {
+			return nil, errors.NewFileOpenError("打开文件失败", err)
+		}
 	}
 
-	handle = &FileHandle{
+	// 创建新的文件句柄
+	handle := &FileHandle{
 		file:    file,          // 文件
 		buffer:  fm.pool.Get(), // 缓冲区
 		lastUse: time.Now(),    // 最后一次使用时间
 	}
-	fm.files[filename] = handle // 添加文件句柄
+	fm.files[filename] = handle
 
 	return handle, nil
 }
@@ -238,4 +252,16 @@ func (fm *FileManager) Close() error {
 		return baseErr
 	}
 	return nil
+}
+
+// SetWriter 设置写入器
+func (fm *FileManager) SetWriter(w io.Writer) error {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+
+	if file, ok := w.(*os.File); ok {
+		fm.currentFile = file
+		return nil
+	}
+	return errors.NewFileOperationError("writer must be *os.File", nil)
 }

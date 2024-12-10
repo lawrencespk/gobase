@@ -7,3 +7,6 @@
 ### 2. 日志系统
 [日志系统文档](/pkg/logger/README.md)
 
+### 3. Recovery 中间件
+[Recovery 中间件文档](/pkg/middleware/recovery/README.md)
+

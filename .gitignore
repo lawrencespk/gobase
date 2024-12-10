@@ -45,6 +45,7 @@ Thumbs.db
 /configs/*.local.yaml
 
 # gz files
+*.gz
 
-# test files
-
+# cursor rules
+.cursorrules
