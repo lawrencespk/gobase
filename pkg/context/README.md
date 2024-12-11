@@ -98,6 +98,63 @@ if err := v.Validate(); err != nil {
 }
 ```
 
+### Gin框架集成
+```go
+// 从 Gin 上下文获取自定义上下文
+func Handler(c *gin.Context) {
+    // 获取或创建自定义上下文
+    ctx := context.FromGinContext(c)
+    
+    // 使用自定义上下文
+    ctx.SetUserID("12345")
+    ctx.SetTraceID("trace-123")
+    
+    // 获取上下文信息
+    userID := ctx.GetUserID()
+    traceID := ctx.GetTraceID()
+}
+
+// 在中间件中使用
+func Middleware() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        ctx := context.FromGinContext(c)
+        // 设置请求追踪信息
+        ctx.SetRequestID(GenerateRequestID())
+        ctx.SetTraceID(GenerateTraceID())
+        c.Next()
+    }
+}
+```
+
+### 链路追踪集成
+```go
+// 设置追踪信息
+ctx.SetTraceID("trace-123")
+ctx.SetSpanID("span-456")
+
+// 获取追踪信息
+traceID := ctx.GetTraceID()
+spanID := ctx.GetSpanID()
+
+// 在请求处理中传递追踪信息
+func ProcessRequest(ctx types.Context) {
+    // 获取当前追踪信息
+    parentTraceID := ctx.GetTraceID()
+    
+    // 创建子追踪
+    childCtx := ctx.Clone()
+    childCtx.SetSpanID(GenerateSpanID())
+    
+    // 处理请求
+    ProcessWithTrace(childCtx)
+}
+```
+### 链路追踪集成
+> 注意：链路追踪功能（pkg/trace）尚在开发中，此处仅展示基础用法。
+> 完整的链路追踪文档将在相关功能开发完成后提供。
+更多链路追踪相关功能，请参考 [链路追踪文档](../trace/README.md) -未开发
+
+
 ## 最佳实践
 
 ### 1. 元数据管理

@@ -145,4 +145,16 @@ const (
 	NacosDataIDError    = "3007" // Nacos数据ID错误
 	NacosTimeoutError   = "3008" // Nacos超时错误
 	NacosOperationError = "3009" // Nacos操作错误
+
+	// 日志中间件错误码 (3100-3199)
+	LogBufferError       = "3100" // 日志缓冲区错误
+	LogFlushError        = "3101" // 日志刷新错误
+	LogRotateError       = "3102" // 日志轮转错误
+	LogFormatError       = "3103" // 日志格式化错误
+	LogWriteError        = "3104" // 日志写入错误
+	LogConfigError       = "3105" // 日志配置错误
+	LogSamplingError     = "3106" // 日志采样错误
+	LogMetricsError      = "3107" // 日志指标错误
+	LogBodyExceededError = "3108" // 日志体超限错误
+	LogBufferFullError   = "3109" // 日志缓冲区满错误
 )
