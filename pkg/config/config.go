@@ -6,12 +6,14 @@ import (
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 
+	"gobase/pkg/config/types"
 	"gobase/pkg/errors"
 )
 
 type Config struct {
-	ELK    ELKConfig    `mapstructure:"elk" yaml:"elk"`
-	Logger LoggerConfig `mapstructure:"logger" yaml:"logger"`
+	ELK    ELKConfig          `mapstructure:"elk" yaml:"elk"`
+	Logger LoggerConfig       `mapstructure:"logger" yaml:"logger"`
+	Jaeger types.JaegerConfig `mapstructure:"jaeger" yaml:"jaeger"`
 }
 
 type ELKConfig struct {

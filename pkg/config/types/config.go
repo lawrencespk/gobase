@@ -138,3 +138,46 @@ func WithNacosTimeout(timeout time.Duration) ConfigOption {
 		o.NacosConfig.TimeoutMs = int(timeout.Milliseconds())
 	}
 }
+
+// JaegerConfig Jaeger配置
+type JaegerConfig struct {
+	Enable      bool                  `mapstructure:"enable" json:"enable" yaml:"enable"`
+	ServiceName string                `mapstructure:"service_name" json:"service_name" yaml:"service_name"`
+	Agent       JaegerAgentConfig     `mapstructure:"agent" json:"agent" yaml:"agent"`
+	Collector   JaegerCollectorConfig `mapstructure:"collector" json:"collector" yaml:"collector"`
+	Sampler     JaegerSamplerConfig   `mapstructure:"sampler" json:"sampler" yaml:"sampler"`
+	Tags        map[string]string     `mapstructure:"tags" json:"tags" yaml:"tags"`
+	Buffer      JaegerBufferConfig    `mapstructure:"buffer" json:"buffer" yaml:"buffer"`
+}
+
+// JaegerAgentConfig Jaeger Agent配置
+type JaegerAgentConfig struct {
+	Host string `mapstructure:"host" json:"host" yaml:"host"`
+	Port string `mapstructure:"port" json:"port" yaml:"port"`
+}
+
+// JaegerCollectorConfig Jaeger Collector配置
+type JaegerCollectorConfig struct {
+	Endpoint string        `mapstructure:"endpoint" json:"endpoint" yaml:"endpoint"`
+	Username string        `mapstructure:"username" json:"username" yaml:"username"`
+	Password string        `mapstructure:"password" json:"password" yaml:"password"`
+	Timeout  time.Duration `mapstructure:"timeout" json:"timeout" yaml:"timeout"`
+}
+
+// JaegerSamplerConfig 采样配置
+type JaegerSamplerConfig struct {
+	Type            string  `mapstructure:"type" json:"type" yaml:"type"`
+	Param           float64 `mapstructure:"param" json:"param" yaml:"param"`
+	ServerURL       string  `mapstructure:"server_url" json:"server_url" yaml:"server_url"`
+	MaxOperations   int     `mapstructure:"max_operations" json:"max_operations" yaml:"max_operations"`
+	RefreshInterval int     `mapstructure:"refresh_interval" json:"refresh_interval" yaml:"refresh_interval"`
+	RateLimit       float64 `mapstructure:"rate_limit" json:"rate_limit" yaml:"rate_limit"`
+	Adaptive        bool    `mapstructure:"adaptive" json:"adaptive" yaml:"adaptive"`
+}
+
+// JaegerBufferConfig 缓冲区配置
+type JaegerBufferConfig struct {
+	Enable        bool          `mapstructure:"enable" json:"enable" yaml:"enable"`
+	Size          int           `mapstructure:"size" json:"size" yaml:"size"`
+	FlushInterval time.Duration `mapstructure:"flush_interval" json:"flush_interval" yaml:"flush_interval"`
+}

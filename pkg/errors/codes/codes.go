@@ -157,4 +157,16 @@ const (
 	LogMetricsError      = "3107" // 日志指标错误
 	LogBodyExceededError = "3108" // 日志体超限错误
 	LogBufferFullError   = "3109" // 日志缓冲区满错误
+
+	// Jaeger相关错误码 (3200-3299)
+	JaegerInitError      = "3200" // Jaeger初始化错误
+	JaegerConnectError   = "3201" // Jaeger连接错误
+	JaegerSpanError      = "3202" // Jaeger Span操作错误
+	JaegerFlushError     = "3203" // Jaeger刷新错误
+	JaegerSamplerError   = "3204" // Jaeger采样错误
+	JaegerContextError   = "3205" // Jaeger上下文错误
+	JaegerConfigError    = "3206" // Jaeger配置错误
+	JaegerShutdownError  = "3207" // Jaeger关闭错误
+	JaegerReporterError  = "3208" // Jaeger上报错误
+	JaegerPropagateError = "3209" // Jaeger传播错误
 )
