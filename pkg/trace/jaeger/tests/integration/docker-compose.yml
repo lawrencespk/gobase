@@ -1,0 +1,18 @@
+version: '3.7'
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "6831:6831/udp"   # agent
+      - "16686:16686"     # ui
+      - "14268:14268"     # collector
+      - "5778:5778"       # sampling
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+      - COLLECTOR_OTLP_ENABLED=true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:16686"]
+      interval: 10s
+      timeout: 5s
+      retries: 3

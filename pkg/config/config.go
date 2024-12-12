@@ -208,6 +208,22 @@ func ValidateConfig(cfg *Config) error {
 		return errors.NewConfigError("elk bulk interval is empty", nil)
 	}
 
+	// 添加 Jaeger 配置验证
+	if cfg.Jaeger.Enable {
+		if cfg.Jaeger.ServiceName == "" {
+			return errors.NewConfigError("jaeger service name is empty", nil)
+		}
+		if cfg.Jaeger.Agent.Host == "" {
+			return errors.NewConfigError("jaeger agent host is empty", nil)
+		}
+		if cfg.Jaeger.Agent.Port == "" {
+			return errors.NewConfigError("jaeger agent port is empty", nil)
+		}
+		if cfg.Jaeger.Collector.Endpoint == "" {
+			return errors.NewConfigError("jaeger collector endpoint is empty", nil)
+		}
+	}
+
 	return nil
 }
 
