@@ -1,6 +1,7 @@
 package collector_test
 
 import (
+	"strings"
 	"testing"
 
 	"gobase/pkg/monitor/prometheus/collector"
@@ -71,7 +72,7 @@ func TestResourceCollector(t *testing.T) {
 		var hasCPUMetric bool
 		for metric := range ch {
 			desc := metric.Desc()
-			if desc.String() == "Desc{fqName: \"test_system_cpu_usage_percent\", help: \"System CPU usage percentage\", constLabels: {}, variableLabels: [cpu]}" {
+			if strings.Contains(desc.String(), "test_system_cpu_usage_percent") {
 				hasCPUMetric = true
 				break
 			}

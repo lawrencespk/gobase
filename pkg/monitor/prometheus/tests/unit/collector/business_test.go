@@ -1,6 +1,8 @@
 package collector_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"gobase/pkg/monitor/prometheus/collector"
@@ -46,6 +48,12 @@ func TestBusinessCollector(t *testing.T) {
 		bc := collector.NewBusinessCollector("test")
 		ch := make(chan prometheus.Metric, 10)
 
+		// 添加一些测试数据
+		bc.ObserveOperation("test_operation", 0.5, nil)                      // 添加成功操作
+		bc.ObserveOperation("test_operation", 1.0, fmt.Errorf("test error")) // 添加失败操作
+		bc.SetQueueSize("test_queue", 100)                                   // 设置队列大小
+		bc.SetProcessRate("test_operation", 50.0)                            // 设置处理速率
+
 		// Act
 		bc.Collect(ch)
 		close(ch)
@@ -80,18 +88,23 @@ func TestBusinessCollector(t *testing.T) {
 		bc := collector.NewBusinessCollector("test")
 		ch := make(chan prometheus.Metric, 10)
 
+		// 添加测试数据
+		bc.ObserveOperation("test_operation", 0.5, nil)
+
 		// Act
 		bc.Collect(ch)
 		close(ch)
 
 		// Assert
-		var hasOperationLabel bool
+		var foundOperationMetric bool
 		for metric := range ch {
-			if metric.Desc().String() == "test_business_operations_total" {
-				hasOperationLabel = true
+			desc := metric.Desc().String()
+			if strings.Contains(desc, "test_business_operations_total") &&
+				strings.Contains(desc, "operation") {
+				foundOperationMetric = true
 				break
 			}
 		}
-		assert.True(t, hasOperationLabel, "应该包含操作标签")
+		assert.True(t, foundOperationMetric, "应该包含操作标签")
 	})
 }

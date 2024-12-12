@@ -1,7 +1,9 @@
 package collector_test
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"gobase/pkg/monitor/prometheus/collector"
 
@@ -14,107 +16,150 @@ func TestSystemCollector(t *testing.T) {
 		// Arrange
 		sc := collector.NewSystemCollector("test")
 
-		// Act
-		err := prometheus.Register(sc)
-
-		// Assert
-		assert.NoError(t, err)
-
-		// Cleanup
-		prometheus.Unregister(sc)
+		// Act & Assert
+		assert.NotNil(t, sc, "系统指标收集器不应为空")
+		assert.NoError(t, sc.Register(), "注册系统指标收集器应成功")
 	})
 
 	t.Run("系统指标描述符", func(t *testing.T) {
 		// Arrange
 		sc := collector.NewSystemCollector("test")
-		ch := make(chan *prometheus.Desc, 10)
+		ch := make(chan *prometheus.Desc, 100)
 
 		// Act
 		sc.Describe(ch)
 		close(ch)
 
 		// Assert
-		descCount := 0
-		for range ch {
-			descCount++
+		var descs []*prometheus.Desc
+		for desc := range ch {
+			descs = append(descs, desc)
 		}
-		assert.Greater(t, descCount, 0, "应该至少有一个指标描述符")
+		assert.Greater(t, len(descs), 0, "应该至少有一个指标描述符")
 	})
 
 	t.Run("系统指标收集", func(t *testing.T) {
 		// Arrange
 		sc := collector.NewSystemCollector("test")
-		ch := make(chan prometheus.Metric, 10)
+		ch := make(chan prometheus.Metric, 100)
+		done := make(chan struct{})
 
 		// Act
-		sc.Collect(ch)
-		close(ch)
+		go func() {
+			sc.Collect(ch)
+			close(ch)
+			close(done)
+		}()
 
 		// Assert
-		metricCount := 0
-		for range ch {
-			metricCount++
+		select {
+		case <-done:
+			var metrics []prometheus.Metric
+			for metric := range ch {
+				metrics = append(metrics, metric)
+			}
+			assert.Greater(t, len(metrics), 0, "应该至少有一个指标")
+		case <-time.After(5 * time.Second):
+			t.Fatal("测试超时")
 		}
-		assert.Greater(t, metricCount, 0, "应该至少有一个指标")
 	})
 
 	t.Run("系统负载指标", func(t *testing.T) {
 		// Arrange
 		sc := collector.NewSystemCollector("test")
-		ch := make(chan prometheus.Metric, 10)
+		metricCh := make(chan prometheus.Metric, 100)
+		done := make(chan struct{})
+		var metrics []prometheus.Metric
 
 		// Act
-		sc.Collect(ch)
-		close(ch)
+		go func() {
+			sc.Collect(metricCh)
+			close(metricCh)
+			close(done)
+		}()
 
 		// Assert
-		var hasLoadMetric bool
-		for metric := range ch {
-			if metric.Desc().String() == "system_load_average" {
-				hasLoadMetric = true
-				break
+		select {
+		case <-done:
+			for metric := range metricCh {
+				metrics = append(metrics, metric)
 			}
+			var hasLoadMetric bool
+			for _, metric := range metrics {
+				if strings.Contains(metric.Desc().String(), "system_load_average") {
+					hasLoadMetric = true
+					break
+				}
+			}
+			assert.True(t, hasLoadMetric, "应该包含系统负载指标")
+		case <-time.After(5 * time.Second):
+			t.Fatal("测试超时")
 		}
-		assert.True(t, hasLoadMetric, "应该包含系统负载指标")
 	})
 
 	t.Run("系统文件描述符指标", func(t *testing.T) {
 		// Arrange
 		sc := collector.NewSystemCollector("test")
-		ch := make(chan prometheus.Metric, 10)
+		metricCh := make(chan prometheus.Metric, 100)
+		done := make(chan struct{})
+		var metrics []prometheus.Metric
 
 		// Act
-		sc.Collect(ch)
-		close(ch)
+		go func() {
+			sc.Collect(metricCh)
+			close(metricCh)
+			close(done)
+		}()
 
 		// Assert
-		var hasFDMetric bool
-		for metric := range ch {
-			if metric.Desc().String() == "system_open_fds" {
-				hasFDMetric = true
-				break
+		select {
+		case <-done:
+			for metric := range metricCh {
+				metrics = append(metrics, metric)
 			}
+			var hasFDMetric bool
+			for _, metric := range metrics {
+				if strings.Contains(metric.Desc().String(), "system_open_fds") {
+					hasFDMetric = true
+					break
+				}
+			}
+			assert.True(t, hasFDMetric, "应该包含文件描述符指标")
+		case <-time.After(5 * time.Second):
+			t.Fatal("测试超时")
 		}
-		assert.True(t, hasFDMetric, "应该包含文件描述符指标")
 	})
 
 	t.Run("系统网络连接指标", func(t *testing.T) {
 		// Arrange
 		sc := collector.NewSystemCollector("test")
-		ch := make(chan prometheus.Metric, 10)
+		metricCh := make(chan prometheus.Metric, 100)
+		done := make(chan struct{})
+		var metrics []prometheus.Metric
 
 		// Act
-		sc.Collect(ch)
-		close(ch)
+		go func() {
+			sc.Collect(metricCh)
+			close(metricCh)
+			close(done)
+		}()
 
 		// Assert
-		var hasNetConnMetric bool
-		for metric := range ch {
-			if metric.Desc().String() == "system_net_connections" {
-				hasNetConnMetric = true
-				break
+		select {
+		case <-done:
+			for metric := range metricCh {
+				metrics = append(metrics, metric)
 			}
+			var hasNetConnMetric bool
+			for _, metric := range metrics {
+				if strings.Contains(metric.Desc().String(), "system_net_connections") {
+					hasNetConnMetric = true
+					break
+				}
+			}
+			assert.True(t, hasNetConnMetric, "应该包含网络连接指标")
+		case <-time.After(5 * time.Second):
+			t.Fatal("测试超时")
 		}
-		assert.True(t, hasNetConnMetric, "应该包含网络连接指标")
 	})
 }

@@ -10,102 +10,142 @@ import (
 )
 
 func TestCounter(t *testing.T) {
-	t.Run("创建和注册基础计数器", func(t *testing.T) {
+	// 每个测试用例执行前重置注册表
+	prometheus.DefaultRegisterer = prometheus.NewRegistry()
+
+	t.Run("创建计数器", func(t *testing.T) {
 		// Arrange
 		opts := prometheus.CounterOpts{
-			Name: "test_counter",
-			Help: "Test counter help",
+			Name: "test_counter_create",
+			Help: "Test counter creation",
 		}
 
 		// Act
 		counter := metric.NewCounter(opts)
-		counter.WithLabels()
-		err := counter.Register()
 
 		// Assert
-		assert.NoError(t, err)
-
-		// Cleanup
-		prometheus.Unregister(counter)
+		assert.NotNil(t, counter)
+		assert.NotNil(t, counter.GetCounter())
+		// 验证是否为基础计数器（没有标签）
+		assert.NotNil(t, counter.GetCollector())
 	})
 
-	t.Run("创建和注册带标签的计数器", func(t *testing.T) {
+	t.Run("基础计数器操作", func(t *testing.T) {
 		// Arrange
 		opts := prometheus.CounterOpts{
-			Name: "test_counter_with_labels",
-			Help: "Test counter with labels help",
-		}
-		labels := []string{"label1", "label2"}
-
-		// Act
-		counter := metric.NewCounter(opts).WithLabels(labels...)
-		err := counter.Register()
-
-		// Assert
-		assert.NoError(t, err)
-
-		// Cleanup
-		prometheus.Unregister(counter)
-	})
-
-	t.Run("计数器增加值", func(t *testing.T) {
-		// Arrange
-		opts := prometheus.CounterOpts{
-			Name: "test_counter_inc",
-			Help: "Test counter increment help",
+			Name: "test_counter_basic",
+			Help: "Test basic counter operations",
 		}
 		counter := metric.NewCounter(opts)
-		counter.Register()
+		err := counter.Register()
 
-		// Act
-		counter.Inc()
-		counter.Add(2)
+		// Assert registration
+		assert.NoError(t, err)
 
-		// Assert
-		// 由于Counter的值只能通过Prometheus API获取,
-		// 这里只能验证操作不会panic
-
-		// Cleanup
-		prometheus.Unregister(counter)
-	})
-
-	t.Run("带标签的计数器操作", func(t *testing.T) {
-		// Arrange
-		opts := prometheus.CounterOpts{
-			Name: "test_counter_labels_ops",
-			Help: "Test counter with labels operations help",
-		}
-		counter := metric.NewCounter(opts).WithLabels("method", "status")
-		counter.Register()
-
-		// Act & Assert
+		// Act & Assert operations
 		assert.NotPanics(t, func() {
-			counter.WithLabelValues("GET", "200").Inc()
-			counter.WithLabelValues("POST", "500").Add(2)
+			counter.Inc()
+			counter.Add(2.5)
 		})
 
 		// Cleanup
-		prometheus.Unregister(counter)
+		prometheus.Unregister(counter.GetCollector())
 	})
 
-	t.Run("重复注册计数器", func(t *testing.T) {
+	t.Run("带标签的计数器", func(t *testing.T) {
+		// Arrange
+		opts := prometheus.CounterOpts{
+			Name: "test_counter_labels",
+			Help: "Test counter with labels",
+		}
+		labels := []string{"method", "status"}
+		counter := metric.NewCounter(opts).WithLabels(labels...)
+
+		// Act
+		err := counter.Register()
+
+		// Assert
+		assert.NoError(t, err)
+		assert.NotNil(t, counter.GetCollector())
+		assert.Nil(t, counter.GetCounter()) // 有标签时，基础计数器应为nil
+
+		// 验证是否为向量计数器
+		_, ok := counter.GetCollector().(*prometheus.CounterVec)
+		assert.True(t, ok, "应该是CounterVec类型")
+
+		// Test label operations
+		assert.NotPanics(t, func() {
+			counter.WithLabelValues("GET", "200").Inc()
+			counter.WithLabelValues("POST", "500").Add(1.5)
+		})
+
+		// Cleanup
+		prometheus.Unregister(counter.GetCollector())
+	})
+
+	t.Run("重复注册", func(t *testing.T) {
 		// Arrange
 		opts := prometheus.CounterOpts{
 			Name: "test_counter_duplicate",
-			Help: "Test counter duplicate registration help",
+			Help: "Test counter duplicate registration",
 		}
 		counter1 := metric.NewCounter(opts)
 		counter2 := metric.NewCounter(opts)
 
-		// Act
-		err1 := counter1.Register()
-		err2 := counter2.Register()
-
-		// Assert
-		assert.NoError(t, err1)
-		assert.Error(t, err2) // 重复注册应该返回错误
+		// Act & Assert
+		assert.NoError(t, counter1.Register())
+		assert.Error(t, counter2.Register()) // 重复注册应返回错误
 
 		// Cleanup
-		prometheus.Unregister(counter1)
+		prometheus.Unregister(counter1.GetCollector())
+	})
+
+	t.Run("标签值操作", func(t *testing.T) {
+		// Arrange
+		opts := prometheus.CounterOpts{
+			Name: "test_counter_label_values",
+			Help: "Test counter label values operations",
+		}
+		counter := metric.NewCounter(opts).WithLabels("method")
+		err := counter.Register()
+		assert.NoError(t, err)
+
+		// Act & Assert
+		assert.NotPanics(t, func() {
+			// 正确的标签数量
+			counter.WithLabelValues("GET").Inc()
+
+			// 错误的标签数量应该panic
+			assert.Panics(t, func() {
+				counter.WithLabelValues("GET", "extra").Inc()
+			})
+		})
+
+		// Cleanup
+		prometheus.Unregister(counter.GetCollector())
+	})
+
+	t.Run("Collector接口实现", func(t *testing.T) {
+		// Arrange
+		opts := prometheus.CounterOpts{
+			Name: "test_counter_collector",
+			Help: "Test counter collector interface",
+		}
+		counter := metric.NewCounter(opts)
+
+		// Test Describe
+		descCh := make(chan *prometheus.Desc, 1)
+		counter.Describe(descCh)
+		desc := <-descCh
+		assert.NotNil(t, desc)
+
+		// Test Collect
+		metricCh := make(chan prometheus.Metric, 1)
+		counter.Collect(metricCh)
+		metric := <-metricCh
+		assert.NotNil(t, metric)
+
+		close(descCh)
+		close(metricCh)
 	})
 }

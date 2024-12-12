@@ -5,6 +5,8 @@ import (
 
 	"gobase/pkg/monitor/prometheus/collector"
 
+	"strings"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 )
@@ -31,13 +33,15 @@ func TestHTTPCollector(t *testing.T) {
 
 		// Act
 		hc.Describe(ch)
+		close(ch)
 
 		// Assert
 		descCount := 0
-		for range ch {
+		for desc := range ch {
+			assert.NotNil(t, desc)
 			descCount++
 		}
-		assert.Greater(t, descCount, 0, "应该至少有一个指标描述符")
+		assert.Equal(t, 6, descCount, "应该有6个指标描述符")
 	})
 
 	t.Run("HTTP指标收集", func(t *testing.T) {
@@ -45,36 +49,45 @@ func TestHTTPCollector(t *testing.T) {
 		hc := collector.NewHTTPCollector("test")
 		ch := make(chan prometheus.Metric, 10)
 
+		// 添加一些测试数据
+		hc.ObserveRequest("GET", "/test", 200, 100, 1000, 2000)
+		hc.IncActiveRequests("GET")
+		hc.ObserveSlowRequest("GET", "/test", 5000)
+
 		// Act
 		hc.Collect(ch)
+		close(ch)
 
 		// Assert
 		metricCount := 0
-		for range ch {
+		for metric := range ch {
+			assert.NotNil(t, metric)
 			metricCount++
 		}
 		assert.Greater(t, metricCount, 0, "应该至少有一个指标")
 	})
 
-	t.Run("HTTP请求计数器", func(t *testing.T) {
+	t.Run("HTTP指标标签验证", func(t *testing.T) {
 		// Arrange
 		hc := collector.NewHTTPCollector("test")
-		method := "GET"
-		path := "/test"
-		status := 200
+		ch := make(chan prometheus.Metric, 10)
+
+		// 添加测试数据
+		hc.ObserveRequest("GET", "/test", 200, 100, 1000, 2000)
 
 		// Act
-		hc.ObserveRequest(method, path, status, 0, 100, 200)
-
-		// Assert
-		ch := make(chan prometheus.Metric, 10)
 		hc.Collect(ch)
 		close(ch)
 
-		metricCount := 0
-		for range ch {
-			metricCount++
+		// Assert
+		var foundRequestMetric bool
+		for metric := range ch {
+			desc := metric.Desc().String()
+			if strings.Contains(desc, "test_http_requests_total") {
+				foundRequestMetric = true
+				break
+			}
 		}
-		assert.Greater(t, metricCount, 0, "应该至少有一个指标")
+		assert.True(t, foundRequestMetric, "应该包含请求总数指标")
 	})
 }

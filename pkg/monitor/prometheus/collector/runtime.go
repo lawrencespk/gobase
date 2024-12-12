@@ -34,38 +34,38 @@ func NewRuntimeCollector(namespace string) *RuntimeCollector {
 		Namespace: namespace,
 		Name:      "runtime_goroutines_total",
 		Help:      "Total number of goroutines",
-	})
+	}).WithLabels([]string{})
 
 	// 运行时内存指标
 	c.memAlloc = metric.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "runtime_memory_alloc_bytes",
 		Help:      "Runtime allocated memory in bytes",
-	})
+	}).WithLabels([]string{})
 
 	c.memTotal = metric.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "runtime_memory_total_bytes",
 		Help:      "Runtime total allocated memory in bytes",
-	})
+	}).WithLabels([]string{})
 
 	c.memSys = metric.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "runtime_memory_sys_bytes",
 		Help:      "Runtime system memory in bytes",
-	})
+	}).WithLabels([]string{})
 
 	c.memHeapAlloc = metric.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "runtime_memory_heap_alloc_bytes",
 		Help:      "Runtime heap memory allocated in bytes",
-	})
+	}).WithLabels([]string{})
 
 	c.memHeapSys = metric.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "runtime_memory_heap_sys_bytes",
 		Help:      "Runtime heap memory obtained from system in bytes",
-	})
+	}).WithLabels([]string{})
 
 	// GC指标
 	c.gcPause = metric.NewHistogram(prometheus.HistogramOpts{
@@ -73,13 +73,13 @@ func NewRuntimeCollector(namespace string) *RuntimeCollector {
 		Name:      "runtime_gc_pause_seconds",
 		Help:      "Runtime GC pause time in seconds",
 		Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1},
-	})
+	}).WithLabels()
 
 	c.gcCount = metric.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace,
 		Name:      "runtime_gc_count_total",
 		Help:      "Runtime total number of GC cycles",
-	})
+	}).WithLabels()
 
 	return c
 }

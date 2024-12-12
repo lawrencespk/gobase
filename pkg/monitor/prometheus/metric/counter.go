@@ -1,6 +1,8 @@
 package metric
 
 import (
+	"fmt"
+
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -9,21 +11,25 @@ type Counter struct {
 	counter prometheus.Counter
 	vec     *prometheus.CounterVec
 	opts    prometheus.CounterOpts
+	labels  []string // 添加labels字段保存标签
 }
 
 // NewCounter 创建计数器
 func NewCounter(opts prometheus.CounterOpts) *Counter {
-	return &Counter{
+	c := &Counter{
 		opts: opts,
 	}
+	// 立即创建counter，避免nil指针
+	c.counter = prometheus.NewCounter(opts)
+	return c
 }
 
 // WithLabels 设置标签
 func (c *Counter) WithLabels(labels ...string) *Counter {
+	c.labels = labels
 	if len(labels) > 0 {
 		c.vec = prometheus.NewCounterVec(c.opts, labels)
-	} else {
-		c.counter = prometheus.NewCounter(c.opts)
+		c.counter = nil // 有标签时不使用普通counter
 	}
 	return c
 }
@@ -52,13 +58,13 @@ func (c *Counter) WithLabelValues(lvs ...string) prometheus.Counter {
 
 // Register 注册指标
 func (c *Counter) Register() error {
-	var err error
 	if c.vec != nil {
-		err = prometheus.Register(c.vec)
-	} else {
-		err = prometheus.Register(c.counter)
+		return prometheus.Register(c.vec)
 	}
-	return err
+	if c.counter != nil {
+		return prometheus.Register(c.counter)
+	}
+	return fmt.Errorf("no counter or counter vec initialized")
 }
 
 // GetCollector 返回底层的 prometheus.Collector

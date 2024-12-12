@@ -13,17 +13,22 @@ type Gauge struct {
 
 // NewGauge 创建仪表盘
 func NewGauge(opts prometheus.GaugeOpts) *Gauge {
-	return &Gauge{
+	g := &Gauge{
 		opts: opts,
 	}
+	// 立即创建gauge，避免nil指针
+	g.gauge = prometheus.NewGauge(opts)
+	return g
 }
 
 // WithLabels 设置标签
 func (g *Gauge) WithLabels(labels []string) *Gauge {
 	if len(labels) > 0 {
 		g.vec = prometheus.NewGaugeVec(g.opts, labels)
+		g.gauge = nil // 当使用标签时，清除基础仪表盘
 	} else {
 		g.gauge = prometheus.NewGauge(g.opts)
+		g.vec = nil // 当不使用标签时，清除向量仪表盘
 	}
 	return g
 }

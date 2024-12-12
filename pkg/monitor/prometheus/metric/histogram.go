@@ -13,17 +13,21 @@ type Histogram struct {
 
 // NewHistogram 创建直方图
 func NewHistogram(opts prometheus.HistogramOpts) *Histogram {
-	return &Histogram{
+	h := &Histogram{
 		opts: opts,
 	}
+	h.histogram = prometheus.NewHistogram(opts)
+	return h
 }
 
 // WithLabels 设置标签
 func (h *Histogram) WithLabels(labels ...string) *Histogram {
 	if len(labels) > 0 {
 		h.vec = prometheus.NewHistogramVec(h.opts, labels)
+		h.histogram = nil
 	} else {
 		h.histogram = prometheus.NewHistogram(h.opts)
+		h.vec = nil
 	}
 	return h
 }

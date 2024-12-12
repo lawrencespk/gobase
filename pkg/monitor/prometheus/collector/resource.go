@@ -1,9 +1,6 @@
 package collector
 
 import (
-	"fmt"
-	"gobase/pkg/monitor/prometheus/metric"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
@@ -13,87 +10,85 @@ import (
 // ResourceCollector 系统资源指标收集器
 // 负责收集操作系统级别的资源使用指标,如CPU、内存、磁盘等
 type ResourceCollector struct {
+	namespace string
 	// 系统CPU使用率
-	cpuUsage *metric.Gauge
+	cpuUsage prometheus.Gauge
 
 	// 系统内存使用
-	memUsage *metric.Gauge
-	memTotal *metric.Gauge
-	memFree  *metric.Gauge
+	memUsage prometheus.Gauge
+	memTotal prometheus.Gauge
+	memFree  prometheus.Gauge
 
 	// 系统磁盘使用
-	diskUsage *metric.Gauge
-	diskTotal *metric.Gauge
-	diskFree  *metric.Gauge
+	diskUsage prometheus.GaugeVec
+	diskTotal prometheus.GaugeVec
+	diskFree  prometheus.GaugeVec
 }
 
 // NewResourceCollector 创建资源收集器
 func NewResourceCollector(namespace string) *ResourceCollector {
-	c := &ResourceCollector{}
+	c := &ResourceCollector{
+		namespace: namespace,
+	}
 
 	// CPU指标
-	c.cpuUsage = metric.NewGauge(prometheus.GaugeOpts{
+	c.cpuUsage = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
-		Name:      "system_cpu_usage_percent",
+		Subsystem: "system",
+		Name:      "cpu_usage_percent",
 		Help:      "System CPU usage percentage",
-	}).WithLabels([]string{"cpu"})
+	})
 
 	// 内存指标
-	c.memUsage = metric.NewGauge(prometheus.GaugeOpts{
+	c.memUsage = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "system_memory_usage_bytes",
 		Help:      "System memory usage in bytes",
 	})
 
-	c.memTotal = metric.NewGauge(prometheus.GaugeOpts{
+	c.memTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "system_memory_total_bytes",
 		Help:      "System total memory in bytes",
 	})
 
-	c.memFree = metric.NewGauge(prometheus.GaugeOpts{
+	c.memFree = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "system_memory_free_bytes",
 		Help:      "System free memory in bytes",
 	})
 
 	// 磁盘指标
-	c.diskUsage = metric.NewGauge(prometheus.GaugeOpts{
+	c.diskUsage = *prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "system_disk_usage_bytes",
 		Help:      "System disk usage in bytes",
-	}).WithLabels([]string{"path"})
+	}, []string{"path"})
 
-	c.diskTotal = metric.NewGauge(prometheus.GaugeOpts{
+	c.diskTotal = *prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "system_disk_total_bytes",
 		Help:      "System total disk space in bytes",
-	}).WithLabels([]string{"path"})
+	}, []string{"path"})
 
-	c.diskFree = metric.NewGauge(prometheus.GaugeOpts{
+	c.diskFree = *prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Name:      "system_disk_free_bytes",
 		Help:      "System free disk space in bytes",
-	}).WithLabels([]string{"path"})
+	}, []string{"path"})
 
 	return c
 }
 
 // Describe 实现 prometheus.Collector 接口
 func (c *ResourceCollector) Describe(ch chan<- *prometheus.Desc) {
-	collectors := []prometheus.Collector{
-		c.cpuUsage.GetCollector(),
-		c.memUsage.GetCollector(),
-		c.memTotal.GetCollector(),
-		c.memFree.GetCollector(),
-		c.diskUsage.GetCollector(),
-		c.diskTotal.GetCollector(),
-		c.diskFree.GetCollector(),
-	}
-
-	for _, collector := range collectors {
-		collector.Describe(ch)
-	}
+	ch <- c.cpuUsage.Desc()
+	ch <- c.memUsage.Desc()
+	ch <- c.memTotal.Desc()
+	ch <- c.memFree.Desc()
+	c.diskUsage.Describe(ch)
+	c.diskTotal.Describe(ch)
+	c.diskFree.Describe(ch)
 }
 
 // Collect 实现 prometheus.Collector 接口
@@ -104,29 +99,22 @@ func (c *ResourceCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
-	collectors := []prometheus.Collector{
-		c.cpuUsage.GetCollector(),
-		c.memUsage.GetCollector(),
-		c.memTotal.GetCollector(),
-		c.memFree.GetCollector(),
-		c.diskUsage.GetCollector(),
-		c.diskTotal.GetCollector(),
-		c.diskFree.GetCollector(),
-	}
-
-	for _, collector := range collectors {
-		collector.Collect(ch)
-	}
+	ch <- c.cpuUsage
+	ch <- c.memUsage
+	ch <- c.memTotal
+	ch <- c.memFree
+	c.diskUsage.Collect(ch)
+	c.diskTotal.Collect(ch)
+	c.diskFree.Collect(ch)
 }
 
 // collect 内部方法，用于收集系统资源指标
 func (c *ResourceCollector) collect() error {
 	// 收集CPU使用率
 	cpuPercents, err := cpu.Percent(0, true)
-	if err == nil {
-		for i, percent := range cpuPercents {
-			c.cpuUsage.WithLabelValues(fmt.Sprintf("cpu%d", i)).Set(percent)
-		}
+	if err == nil && len(cpuPercents) > 0 {
+		// 只取第一个CPU的使用率作为总体使用率
+		c.cpuUsage.Set(cpuPercents[0])
 	}
 
 	// 收集内存使用情况
@@ -150,22 +138,15 @@ func (c *ResourceCollector) collect() error {
 	return nil
 }
 
-// Register 注册资源收集器
+// Register 注册资源收集器到 Prometheus
 func (c *ResourceCollector) Register() error {
-	collectors := []interface{}{
-		c.cpuUsage,
-		c.memUsage,
-		c.memTotal,
-		c.memFree,
-		c.diskUsage,
-		c.diskTotal,
-		c.diskFree,
-	}
-
-	for _, collector := range collectors {
-		if err := collector.(interface{ Register() error }).Register(); err != nil {
-			return err
+	// 使用默认的注册表注册收集器
+	if err := prometheus.Register(c); err != nil {
+		// 如果已经注册过，则忽略错误
+		if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
+			return nil
 		}
+		return err
 	}
 	return nil
 }
