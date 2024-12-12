@@ -105,8 +105,47 @@ func (c *RuntimeCollector) Register() error {
 	return nil
 }
 
-// Collect 收集运行时指标
-func (c *RuntimeCollector) Collect() {
+// Describe 实现 prometheus.Collector 接口
+func (c *RuntimeCollector) Describe(ch chan<- *prometheus.Desc) {
+	collectors := []prometheus.Collector{
+		c.goroutines.GetCollector(),
+		c.memAlloc.GetCollector(),
+		c.memTotal.GetCollector(),
+		c.memSys.GetCollector(),
+		c.memHeapAlloc.GetCollector(),
+		c.memHeapSys.GetCollector(),
+		c.gcPause.GetCollector(),
+		c.gcCount.GetCollector(),
+	}
+
+	for _, collector := range collectors {
+		collector.Describe(ch)
+	}
+}
+
+// Collect 实现 prometheus.Collector 接口
+func (c *RuntimeCollector) Collect(ch chan<- prometheus.Metric) {
+	// 先收集最新的指标数据
+	c.collect()
+
+	collectors := []prometheus.Collector{
+		c.goroutines.GetCollector(),
+		c.memAlloc.GetCollector(),
+		c.memTotal.GetCollector(),
+		c.memSys.GetCollector(),
+		c.memHeapAlloc.GetCollector(),
+		c.memHeapSys.GetCollector(),
+		c.gcPause.GetCollector(),
+		c.gcCount.GetCollector(),
+	}
+
+	for _, collector := range collectors {
+		collector.Collect(ch)
+	}
+}
+
+// collect 内部方法，用于收集运行时指标
+func (c *RuntimeCollector) collect() {
 	// 收集goroutine数量
 	c.goroutines.Set(float64(runtime.NumGoroutine()))
 

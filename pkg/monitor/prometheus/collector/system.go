@@ -112,8 +112,50 @@ func (c *SystemCollector) Register() error {
 	return nil
 }
 
-// Collect 收集系统指标
-func (c *SystemCollector) Collect() {
+// Describe 实现 prometheus.Collector 接口
+func (c *SystemCollector) Describe(ch chan<- *prometheus.Desc) {
+	collectors := []prometheus.Collector{
+		c.cpuUsage.GetCollector(),
+		c.goroutines.GetCollector(),
+		c.memAlloc.GetCollector(),
+		c.memTotal.GetCollector(),
+		c.memSys.GetCollector(),
+		c.memHeapAlloc.GetCollector(),
+		c.memHeapSys.GetCollector(),
+		c.gcPause.GetCollector(),
+		c.gcCount.GetCollector(),
+	}
+
+	for _, collector := range collectors {
+		collector.Describe(ch)
+	}
+}
+
+// Collect 实现 prometheus.Collector 接口
+func (c *SystemCollector) Collect(ch chan<- prometheus.Metric) {
+	// 先收集最新的指标数据
+	c.collect()
+
+	collectors := []prometheus.Collector{
+		c.cpuUsage.GetCollector(),
+		c.goroutines.GetCollector(),
+		c.memAlloc.GetCollector(),
+		c.memTotal.GetCollector(),
+		c.memSys.GetCollector(),
+		c.memHeapAlloc.GetCollector(),
+		c.memHeapSys.GetCollector(),
+		c.gcPause.GetCollector(),
+		c.gcCount.GetCollector(),
+	}
+
+	for _, collector := range collectors {
+		collector.Collect(ch)
+	}
+}
+
+// collect 内部方法，用于收集系统指标
+func (c *SystemCollector) collect() {
+	// 原来的 Collect 方法内容移到这里
 	// 收集goroutine数量
 	c.goroutines.Set(float64(runtime.NumGoroutine()))
 

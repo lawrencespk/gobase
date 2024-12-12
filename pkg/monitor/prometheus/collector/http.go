@@ -33,7 +33,7 @@ func NewHTTPCollector(namespace string) *HTTPCollector {
 		Namespace: namespace,
 		Name:      "http_requests_total",
 		Help:      "Total number of HTTP requests",
-	}).WithLabels([]string{"method", "path", "status"})
+	}).WithLabels("method", "path", "status")
 
 	// 初始化请求延迟直方图
 	c.requestDuration = metric.NewHistogram(prometheus.HistogramOpts{
@@ -41,7 +41,7 @@ func NewHTTPCollector(namespace string) *HTTPCollector {
 		Name:      "http_request_duration_seconds",
 		Help:      "HTTP request latency in seconds",
 		Buckets:   prometheus.DefBuckets,
-	}).WithLabels([]string{"method", "path"})
+	}).WithLabels("method", "path")
 
 	// 初始化活跃请求数仪表盘
 	c.activeRequests = metric.NewGauge(prometheus.GaugeOpts{
@@ -56,7 +56,7 @@ func NewHTTPCollector(namespace string) *HTTPCollector {
 		Name:      "http_request_size_bytes",
 		Help:      "HTTP request size in bytes",
 		Buckets:   prometheus.ExponentialBuckets(100, 10, 8),
-	}).WithLabels([]string{"method", "path"})
+	}).WithLabels("method", "path")
 
 	// 初始化响应大小直方图
 	c.responseSize = metric.NewHistogram(prometheus.HistogramOpts{
@@ -64,14 +64,14 @@ func NewHTTPCollector(namespace string) *HTTPCollector {
 		Name:      "http_response_size_bytes",
 		Help:      "HTTP response size in bytes",
 		Buckets:   prometheus.ExponentialBuckets(100, 10, 8),
-	}).WithLabels([]string{"method", "path"})
+	}).WithLabels("method", "path")
 
 	// 初始化慢请求计数器
 	c.slowRequests = metric.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace,
 		Name:      "http_slow_requests_total",
 		Help:      "Total number of slow HTTP requests",
-	}).WithLabels([]string{"method", "path"})
+	}).WithLabels("method", "path")
 
 	return c
 }
@@ -122,4 +122,36 @@ func (c *HTTPCollector) DecActiveRequests(method string) {
 // ObserveSlowRequest 记录慢请求
 func (c *HTTPCollector) ObserveSlowRequest(method, path string, duration time.Duration) {
 	c.slowRequests.WithLabelValues(method, path).Inc()
+}
+
+// Describe 实现 prometheus.Collector 接口
+func (c *HTTPCollector) Describe(ch chan<- *prometheus.Desc) {
+	collectors := []prometheus.Collector{
+		c.requestTotal.GetCollector(),
+		c.requestDuration.GetCollector(),
+		c.activeRequests.GetCollector(),
+		c.requestSize.GetCollector(),
+		c.responseSize.GetCollector(),
+		c.slowRequests.GetCollector(),
+	}
+
+	for _, collector := range collectors {
+		collector.Describe(ch)
+	}
+}
+
+// Collect 实现 prometheus.Collector 接口
+func (c *HTTPCollector) Collect(ch chan<- prometheus.Metric) {
+	collectors := []prometheus.Collector{
+		c.requestTotal.GetCollector(),
+		c.requestDuration.GetCollector(),
+		c.activeRequests.GetCollector(),
+		c.requestSize.GetCollector(),
+		c.responseSize.GetCollector(),
+		c.slowRequests.GetCollector(),
+	}
+
+	for _, collector := range collectors {
+		collector.Collect(ch)
+	}
 }

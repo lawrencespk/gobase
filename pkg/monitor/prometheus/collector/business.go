@@ -29,7 +29,7 @@ func NewBusinessCollector(namespace string) *BusinessCollector {
 		Namespace: namespace,
 		Name:      "business_operations_total",
 		Help:      "Total number of business operations",
-	}).WithLabels([]string{"operation", "status"})
+	}).WithLabels("operation", "status")
 
 	// 初始化操作延迟直方图
 	c.operationDuration = metric.NewHistogram(prometheus.HistogramOpts{
@@ -37,14 +37,14 @@ func NewBusinessCollector(namespace string) *BusinessCollector {
 		Name:      "business_operation_duration_seconds",
 		Help:      "Business operation latency in seconds",
 		Buckets:   prometheus.DefBuckets,
-	}).WithLabels([]string{"operation"})
+	}).WithLabels("operation")
 
 	// 初始化错误计数器
 	c.operationErrors = metric.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace,
 		Name:      "business_operation_errors_total",
 		Help:      "Total number of business operation errors",
-	}).WithLabels([]string{"operation", "error_type"})
+	}).WithLabels("operation", "error_type")
 
 	// 初始化队列大小仪表盘
 	c.queueSize = metric.NewGauge(prometheus.GaugeOpts{
@@ -101,4 +101,34 @@ func (c *BusinessCollector) SetQueueSize(queueName string, size float64) {
 // SetProcessRate 设置处理速率
 func (c *BusinessCollector) SetProcessRate(operation string, rate float64) {
 	c.processRate.WithLabelValues(operation).Set(rate)
+}
+
+// Describe 实现 prometheus.Collector 接口
+func (c *BusinessCollector) Describe(ch chan<- *prometheus.Desc) {
+	collectors := []prometheus.Collector{
+		c.operationTotal.GetCollector(),
+		c.operationDuration.GetCollector(),
+		c.operationErrors.GetCollector(),
+		c.queueSize.GetCollector(),
+		c.processRate.GetCollector(),
+	}
+
+	for _, collector := range collectors {
+		collector.Describe(ch)
+	}
+}
+
+// Collect 实现 prometheus.Collector 接口
+func (c *BusinessCollector) Collect(ch chan<- prometheus.Metric) {
+	collectors := []prometheus.Collector{
+		c.operationTotal.GetCollector(),
+		c.operationDuration.GetCollector(),
+		c.operationErrors.GetCollector(),
+		c.queueSize.GetCollector(),
+		c.processRate.GetCollector(),
+	}
+
+	for _, collector := range collectors {
+		collector.Collect(ch)
+	}
 }

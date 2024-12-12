@@ -81,3 +81,16 @@ func (g *Gauge) Register() error {
 	}
 	return err
 }
+
+// GetCollector 返回底层的 prometheus.Collector
+func (g *Gauge) GetCollector() prometheus.Collector {
+	if g.vec != nil {
+		return g.vec
+	}
+	return g.gauge
+}
+
+// GetGauge 返回底层的 prometheus.Gauge
+func (g *Gauge) GetGauge() prometheus.Gauge {
+	return g.gauge
+}

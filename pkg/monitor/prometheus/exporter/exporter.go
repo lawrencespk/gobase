@@ -12,6 +12,7 @@ import (
 	"gobase/pkg/monitor/prometheus/collector"
 	configTypes "gobase/pkg/monitor/prometheus/config/types"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -153,7 +154,17 @@ func (e *Exporter) collectSystemMetrics(ctx context.Context) {
 		case <-e.stopChan:
 			return
 		case <-ticker.C:
-			e.runtimeCollector.Collect()
+			// 创建一个临时通道来收集指标
+			ch := make(chan prometheus.Metric, 100)
+			go func() {
+				e.runtimeCollector.Collect(ch)
+				close(ch)
+			}()
+
+			// 消费收集到的指标
+			for range ch {
+				// 指标已经被收集器处理，这里不需要额外处理
+			}
 		}
 	}
 }

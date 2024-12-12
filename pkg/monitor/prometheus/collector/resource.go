@@ -79,8 +79,48 @@ func NewResourceCollector(namespace string) *ResourceCollector {
 	return c
 }
 
-// Collect 收集系统资源指标
-func (c *ResourceCollector) Collect() error {
+// Describe 实现 prometheus.Collector 接口
+func (c *ResourceCollector) Describe(ch chan<- *prometheus.Desc) {
+	collectors := []prometheus.Collector{
+		c.cpuUsage.GetCollector(),
+		c.memUsage.GetCollector(),
+		c.memTotal.GetCollector(),
+		c.memFree.GetCollector(),
+		c.diskUsage.GetCollector(),
+		c.diskTotal.GetCollector(),
+		c.diskFree.GetCollector(),
+	}
+
+	for _, collector := range collectors {
+		collector.Describe(ch)
+	}
+}
+
+// Collect 实现 prometheus.Collector 接口
+func (c *ResourceCollector) Collect(ch chan<- prometheus.Metric) {
+	// 先收集最新的指标数据
+	if err := c.collect(); err != nil {
+		// TODO: 考虑是否需要记录错误日志
+		return
+	}
+
+	collectors := []prometheus.Collector{
+		c.cpuUsage.GetCollector(),
+		c.memUsage.GetCollector(),
+		c.memTotal.GetCollector(),
+		c.memFree.GetCollector(),
+		c.diskUsage.GetCollector(),
+		c.diskTotal.GetCollector(),
+		c.diskFree.GetCollector(),
+	}
+
+	for _, collector := range collectors {
+		collector.Collect(ch)
+	}
+}
+
+// collect 内部方法，用于收集系统资源指标
+func (c *ResourceCollector) collect() error {
 	// 收集CPU使用率
 	cpuPercents, err := cpu.Percent(0, true)
 	if err == nil {

@@ -19,7 +19,7 @@ func NewCounter(opts prometheus.CounterOpts) *Counter {
 }
 
 // WithLabels 设置标签
-func (c *Counter) WithLabels(labels []string) *Counter {
+func (c *Counter) WithLabels(labels ...string) *Counter {
 	if len(labels) > 0 {
 		c.vec = prometheus.NewCounterVec(c.opts, labels)
 	} else {
@@ -59,4 +59,35 @@ func (c *Counter) Register() error {
 		err = prometheus.Register(c.counter)
 	}
 	return err
+}
+
+// GetCollector 返回底层的 prometheus.Collector
+func (c *Counter) GetCollector() prometheus.Collector {
+	if c.vec != nil {
+		return c.vec
+	}
+	return c.counter
+}
+
+// GetCounter 返回底层的 prometheus.Counter
+func (c *Counter) GetCounter() prometheus.Counter {
+	return c.counter
+}
+
+// Describe 实现 prometheus.Collector 接口
+func (c *Counter) Describe(ch chan<- *prometheus.Desc) {
+	if c.vec != nil {
+		c.vec.Describe(ch)
+	} else if c.counter != nil {
+		ch <- c.counter.Desc()
+	}
+}
+
+// Collect 实现 prometheus.Collector 接口
+func (c *Counter) Collect(ch chan<- prometheus.Metric) {
+	if c.vec != nil {
+		c.vec.Collect(ch)
+	} else if c.counter != nil {
+		ch <- c.counter
+	}
 }
