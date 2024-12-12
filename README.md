@@ -22,3 +22,6 @@
 ### 7. Context 中间件
 [Context 中间件文档](/pkg/middleware/context/README.md)
 
+### 8. 链路追踪
+[链路追踪文档](/pkg/trace/jaeger/README.md)
+
