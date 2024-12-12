@@ -1,0 +1,46 @@
+groups:
+  - name: HttpAlerts
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) 
+          / 
+          sum(rate(http_requests_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: High HTTP error rate
+          description: "Error rate is above 10% (current value: {{ $value }})"
+
+      - alert: SlowResponses
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Slow HTTP responses
+          description: "95th percentile of response time is above 1s (current value: {{ $value }}s)"
+
+  - name: SystemAlerts
+    rules:
+      - alert: HighMemoryUsage
+        expr: memory_heap_alloc_bytes / memory_heap_sys_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High memory usage
+          description: "Memory usage is above 85% (current value: {{ $value }})"
+
+      - alert: HighGoroutines
+        expr: goroutines_total > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High number of goroutines
+          description: "Number of goroutines is above 10k (current value: {{ $value }})" 
