@@ -1,14 +1,17 @@
 package metric
 
 import (
+	"fmt"
+
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Gauge 仪表盘类型指标
 type Gauge struct {
-	gauge prometheus.Gauge
-	vec   *prometheus.GaugeVec
-	opts  prometheus.GaugeOpts
+	gauge  prometheus.Gauge
+	vec    *prometheus.GaugeVec
+	opts   prometheus.GaugeOpts
+	labels []string
 }
 
 // NewGauge 创建仪表盘
@@ -23,48 +26,46 @@ func NewGauge(opts prometheus.GaugeOpts) *Gauge {
 
 // WithLabels 设置标签
 func (g *Gauge) WithLabels(labels []string) *Gauge {
+	g.labels = labels
 	if len(labels) > 0 {
 		g.vec = prometheus.NewGaugeVec(g.opts, labels)
-		g.gauge = nil // 当使用标签时，清除基础仪表盘
-	} else {
-		g.gauge = prometheus.NewGauge(g.opts)
-		g.vec = nil // 当不使用标签时，清除向量仪表盘
+		g.gauge = nil // 有标签时不使用普通gauge
 	}
 	return g
 }
 
-// Set 设置值
-func (g *Gauge) Set(val float64) {
-	if g.gauge != nil {
-		g.gauge.Set(val)
-	}
-}
-
-// Inc 值加1
+// Inc 仪表盘加1
 func (g *Gauge) Inc() {
 	if g.gauge != nil {
 		g.gauge.Inc()
 	}
 }
 
-// Dec 值减1
+// Dec 仪表盘减1
 func (g *Gauge) Dec() {
 	if g.gauge != nil {
 		g.gauge.Dec()
 	}
 }
 
-// Add 增加值
+// Add 仪表盘增加指定值
 func (g *Gauge) Add(val float64) {
 	if g.gauge != nil {
 		g.gauge.Add(val)
 	}
 }
 
-// Sub 减少值
+// Sub 仪表盘减少指定值
 func (g *Gauge) Sub(val float64) {
 	if g.gauge != nil {
 		g.gauge.Sub(val)
+	}
+}
+
+// Set 仪表盘设置指定值
+func (g *Gauge) Set(val float64) {
+	if g.gauge != nil {
+		g.gauge.Set(val)
 	}
 }
 
@@ -78,13 +79,13 @@ func (g *Gauge) WithLabelValues(lvs ...string) prometheus.Gauge {
 
 // Register 注册指标
 func (g *Gauge) Register() error {
-	var err error
 	if g.vec != nil {
-		err = prometheus.Register(g.vec)
-	} else {
-		err = prometheus.Register(g.gauge)
+		return prometheus.Register(g.vec)
 	}
-	return err
+	if g.gauge != nil {
+		return prometheus.Register(g.gauge)
+	}
+	return fmt.Errorf("no gauge or gauge vec initialized")
 }
 
 // GetCollector 返回底层的 prometheus.Collector
@@ -93,6 +94,24 @@ func (g *Gauge) GetCollector() prometheus.Collector {
 		return g.vec
 	}
 	return g.gauge
+}
+
+// Describe 实现 prometheus.Collector 接口
+func (g *Gauge) Describe(ch chan<- *prometheus.Desc) {
+	if g.vec != nil {
+		g.vec.Describe(ch)
+	} else if g.gauge != nil {
+		ch <- g.gauge.Desc()
+	}
+}
+
+// Collect 实现 prometheus.Collector 接口
+func (g *Gauge) Collect(ch chan<- prometheus.Metric) {
+	if g.vec != nil {
+		g.vec.Collect(ch)
+	} else if g.gauge != nil {
+		ch <- g.gauge
+	}
 }
 
 // GetGauge 返回底层的 prometheus.Gauge

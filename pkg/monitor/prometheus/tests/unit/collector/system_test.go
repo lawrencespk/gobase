@@ -14,7 +14,7 @@ import (
 func TestSystemCollector(t *testing.T) {
 	t.Run("创建和注册系统指标收集器", func(t *testing.T) {
 		// Arrange
-		sc := collector.NewSystemCollector("test")
+		sc := collector.NewSystemCollector()
 
 		// Act & Assert
 		assert.NotNil(t, sc, "系统指标收集器不应为空")
@@ -23,7 +23,7 @@ func TestSystemCollector(t *testing.T) {
 
 	t.Run("系统指标描述符", func(t *testing.T) {
 		// Arrange
-		sc := collector.NewSystemCollector("test")
+		sc := collector.NewSystemCollector()
 		ch := make(chan *prometheus.Desc, 100)
 
 		// Act
@@ -40,7 +40,7 @@ func TestSystemCollector(t *testing.T) {
 
 	t.Run("系统指标收集", func(t *testing.T) {
 		// Arrange
-		sc := collector.NewSystemCollector("test")
+		sc := collector.NewSystemCollector()
 		ch := make(chan prometheus.Metric, 100)
 		done := make(chan struct{})
 
@@ -66,7 +66,7 @@ func TestSystemCollector(t *testing.T) {
 
 	t.Run("系统负载指标", func(t *testing.T) {
 		// Arrange
-		sc := collector.NewSystemCollector("test")
+		sc := collector.NewSystemCollector()
 		metricCh := make(chan prometheus.Metric, 100)
 		done := make(chan struct{})
 		var metrics []prometheus.Metric
@@ -99,7 +99,7 @@ func TestSystemCollector(t *testing.T) {
 
 	t.Run("系统文件描述符指标", func(t *testing.T) {
 		// Arrange
-		sc := collector.NewSystemCollector("test")
+		sc := collector.NewSystemCollector()
 		metricCh := make(chan prometheus.Metric, 100)
 		done := make(chan struct{})
 		var metrics []prometheus.Metric
@@ -132,7 +132,7 @@ func TestSystemCollector(t *testing.T) {
 
 	t.Run("系统网络连接指标", func(t *testing.T) {
 		// Arrange
-		sc := collector.NewSystemCollector("test")
+		sc := collector.NewSystemCollector()
 		metricCh := make(chan prometheus.Metric, 100)
 		done := make(chan struct{})
 		var metrics []prometheus.Metric

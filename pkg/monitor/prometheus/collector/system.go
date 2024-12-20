@@ -38,171 +38,108 @@ type SystemCollector struct {
 	// GC相关指标
 	gcPause *metric.Histogram // GC暂停时间
 	gcCount *metric.Counter   // GC次数
+
+	// 添加停止通道
+	stopCh chan struct{}
 }
 
-// NewSystemCollector 创建系统指标收集器
-func NewSystemCollector(namespace string) *SystemCollector {
-	c := &SystemCollector{}
+// NewSystemCollector 创建新的系统指标收集器
+func NewSystemCollector() *SystemCollector {
+	c := &SystemCollector{
+		cpuUsage: metric.NewGauge(
+			prometheus.GaugeOpts{
+				Namespace: "system",
+				Name:      "cpu_usage_percent",
+				Help:      "CPU使用率百分比",
+			},
+		),
+		goroutines: metric.NewGauge(prometheus.GaugeOpts{
+			Namespace: "system",
+			Name:      "goroutines_total",
+			Help:      "Total number of goroutines",
+		}),
+		memAlloc: metric.NewGauge(prometheus.GaugeOpts{
+			Namespace: "system",
+			Name:      "memory_alloc_bytes",
+			Help:      "Allocated memory in bytes",
+		}),
+		memTotal: metric.NewGauge(prometheus.GaugeOpts{
+			Namespace: "system",
+			Name:      "memory_total_bytes",
+			Help:      "Total memory in bytes",
+		}),
+		memSys: metric.NewGauge(prometheus.GaugeOpts{
+			Namespace: "system",
+			Name:      "memory_sys_bytes",
+			Help:      "System memory in bytes",
+		}),
+		memHeapAlloc: metric.NewGauge(prometheus.GaugeOpts{
+			Namespace: "system",
+			Name:      "memory_heap_alloc_bytes",
+			Help:      "Heap memory allocated in bytes",
+		}),
+		memHeapSys: metric.NewGauge(prometheus.GaugeOpts{
+			Namespace: "system",
+			Name:      "memory_heap_sys_bytes",
+			Help:      "Heap memory obtained from system in bytes",
+		}),
+		loadAverage: metric.NewGauge(prometheus.GaugeOpts{
+			Namespace: "system",
+			Name:      "system_load_average",
+			Help:      "System load average",
+		}),
+		openFDs: metric.NewGauge(prometheus.GaugeOpts{
+			Namespace: "system",
+			Name:      "system_open_fds",
+			Help:      "Number of open file descriptors",
+		}),
+		netConns: metric.NewGauge(prometheus.GaugeOpts{
+			Namespace: "system",
+			Name:      "system_net_connections",
+			Help:      "Number of network connections",
+		}),
+		gcPause: metric.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "system",
+			Name:      "gc_pause_seconds",
+			Help:      "GC pause time in seconds",
+			Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1},
+		}),
+		gcCount: metric.NewCounter(prometheus.CounterOpts{
+			Namespace: "system",
+			Name:      "gc_count_total",
+			Help:      "Total number of GC cycles",
+		}),
+		stopCh: make(chan struct{}),
+	}
 
-	// CPU指标
-	c.cpuUsage = metric.NewGauge(prometheus.GaugeOpts{
-		Namespace: namespace,
-		Name:      "cpu_usage_percent",
-		Help:      "CPU usage percentage",
-	}).WithLabels([]string{})
-
-	c.goroutines = metric.NewGauge(prometheus.GaugeOpts{
-		Namespace: namespace,
-		Name:      "goroutines_total",
-		Help:      "Total number of goroutines",
-	}).WithLabels([]string{})
-
-	// 内存指标
-	c.memAlloc = metric.NewGauge(prometheus.GaugeOpts{
-		Namespace: namespace,
-		Name:      "memory_alloc_bytes",
-		Help:      "Allocated memory in bytes",
-	}).WithLabels([]string{})
-
-	c.memTotal = metric.NewGauge(prometheus.GaugeOpts{
-		Namespace: namespace,
-		Name:      "memory_total_bytes",
-		Help:      "Total memory in bytes",
-	}).WithLabels([]string{})
-
-	c.memSys = metric.NewGauge(prometheus.GaugeOpts{
-		Namespace: namespace,
-		Name:      "memory_sys_bytes",
-		Help:      "System memory in bytes",
-	}).WithLabels([]string{})
-
-	c.memHeapAlloc = metric.NewGauge(prometheus.GaugeOpts{
-		Namespace: namespace,
-		Name:      "memory_heap_alloc_bytes",
-		Help:      "Heap memory allocated in bytes",
-	}).WithLabels([]string{})
-
-	c.memHeapSys = metric.NewGauge(prometheus.GaugeOpts{
-		Namespace: namespace,
-		Name:      "memory_heap_sys_bytes",
-		Help:      "Heap memory obtained from system in bytes",
-	}).WithLabels([]string{})
-
-	// 添加系统负载指标
-	c.loadAverage = metric.NewGauge(prometheus.GaugeOpts{
-		Namespace: namespace,
-		Name:      "system_load_average",
-		Help:      "System load average",
-	}).WithLabels([]string{})
-
-	// 添加文件描述符指标
-	c.openFDs = metric.NewGauge(prometheus.GaugeOpts{
-		Namespace: namespace,
-		Name:      "system_open_fds",
-		Help:      "Number of open file descriptors",
-	}).WithLabels([]string{})
-
-	// 添加网络连接指标
-	c.netConns = metric.NewGauge(prometheus.GaugeOpts{
-		Namespace: namespace,
-		Name:      "system_net_connections",
-		Help:      "Number of network connections",
-	}).WithLabels([]string{})
-
-	// GC指标
-	c.gcPause = metric.NewHistogram(prometheus.HistogramOpts{
-		Namespace: namespace,
-		Name:      "gc_pause_seconds",
-		Help:      "GC pause time in seconds",
-		Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1},
-	}).WithLabels()
-
-	c.gcCount = metric.NewCounter(prometheus.CounterOpts{
-		Namespace: namespace,
-		Name:      "gc_count_total",
-		Help:      "Total number of GC cycles",
-	}).WithLabels()
-
+	// 立即开始收集数据
+	go c.startCollecting()
 	return c
 }
 
-// Register 注册所有系统指标
-func (c *SystemCollector) Register() error {
-	collectors := []interface{}{
-		c.cpuUsage,
-		c.goroutines,
-		c.memAlloc,
-		c.memTotal,
-		c.memSys,
-		c.memHeapAlloc,
-		c.memHeapSys,
-		c.loadAverage,
-		c.openFDs,
-		c.netConns,
-		c.gcPause,
-		c.gcCount,
-	}
+// startCollecting 开始持续收集系统指标
+func (c *SystemCollector) startCollecting() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
-	for _, collector := range collectors {
-		if err := collector.(interface{ Register() error }).Register(); err != nil {
-			return err
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case <-ticker.C:
+			c.collect()
 		}
 	}
-	return nil
 }
 
-// Describe 实现 prometheus.Collector 接口
-func (c *SystemCollector) Describe(ch chan<- *prometheus.Desc) {
-	collectors := []prometheus.Collector{
-		c.cpuUsage.GetCollector(),
-		c.goroutines.GetCollector(),
-		c.memAlloc.GetCollector(),
-		c.memTotal.GetCollector(),
-		c.memSys.GetCollector(),
-		c.memHeapAlloc.GetCollector(),
-		c.memHeapSys.GetCollector(),
-		c.loadAverage.GetCollector(),
-		c.openFDs.GetCollector(),
-		c.netConns.GetCollector(),
-		c.gcPause.GetCollector(),
-		c.gcCount.GetCollector(),
+// collect 收集当前系统指标
+func (c *SystemCollector) collect() error {
+	// 收集CPU使用率
+	cpuPercent, err := cpu.Percent(0, false)
+	if err == nil && len(cpuPercent) > 0 {
+		c.cpuUsage.Set(cpuPercent[0])
 	}
 
-	// 顺序执行 Describe，避免并发问题
-	for _, collector := range collectors {
-		collector.Describe(ch)
-	}
-}
-
-// Collect 实现 prometheus.Collector 接口
-func (c *SystemCollector) Collect(ch chan<- prometheus.Metric) {
-	// 先收集最新的指标数据
-	c.collect()
-
-	collectors := []prometheus.Collector{
-		c.cpuUsage.GetCollector(),
-		c.goroutines.GetCollector(),
-		c.memAlloc.GetCollector(),
-		c.memTotal.GetCollector(),
-		c.memSys.GetCollector(),
-		c.memHeapAlloc.GetCollector(),
-		c.memHeapSys.GetCollector(),
-		c.loadAverage.GetCollector(),
-		c.openFDs.GetCollector(),
-		c.netConns.GetCollector(),
-		c.gcPause.GetCollector(),
-		c.gcCount.GetCollector(),
-	}
-
-	// 顺序执行 Collect，避免并发问题
-	for _, collector := range collectors {
-		collector.Collect(ch)
-	}
-}
-
-// collect 内部方法，用于收集系统指标
-func (c *SystemCollector) collect() {
-	// 原来的 Collect 方法内容移到这里
 	// 收集goroutine数量
 	c.goroutines.Set(float64(runtime.NumGoroutine()))
 
@@ -236,6 +173,82 @@ func (c *SystemCollector) collect() {
 	if conns, err := getNetConnections(); err == nil {
 		c.netConns.Set(float64(conns))
 	}
+
+	return nil
+}
+
+// Register 注册所有系统指标
+func (c *SystemCollector) Register() error {
+	collectors := []prometheus.Collector{
+		c.cpuUsage,
+		c.goroutines,
+		c.memAlloc,
+		c.memTotal,
+		c.memSys,
+		c.memHeapAlloc,
+		c.memHeapSys,
+		c.loadAverage,
+		c.openFDs,
+		c.netConns,
+		c.gcPause,
+		c.gcCount,
+	}
+
+	for _, collector := range collectors {
+		if err := prometheus.Register(collector); err != nil {
+			// 如果已经注册，则跳过
+			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// Describe 实现 prometheus.Collector 接口
+func (c *SystemCollector) Describe(ch chan<- *prometheus.Desc) {
+	collectors := []prometheus.Collector{
+		c.cpuUsage.GetCollector(),
+		c.goroutines.GetCollector(),
+		c.memAlloc.GetCollector(),
+		c.memTotal.GetCollector(),
+		c.memSys.GetCollector(),
+		c.memHeapAlloc.GetCollector(),
+		c.memHeapSys.GetCollector(),
+		c.loadAverage.GetCollector(),
+		c.openFDs.GetCollector(),
+		c.netConns.GetCollector(),
+		c.gcPause.GetCollector(),
+		c.gcCount.GetCollector(),
+	}
+
+	// 顺序执行 Describe，避免并发问题
+	for _, collector := range collectors {
+		collector.Describe(ch)
+	}
+}
+
+// Collect 实现 prometheus.Collector 接口
+func (c *SystemCollector) Collect(ch chan<- prometheus.Metric) {
+	// 使用底层的 prometheus metric
+	ch <- c.cpuUsage.GetGauge()
+	ch <- c.goroutines.GetGauge()
+	ch <- c.memAlloc.GetGauge()
+	ch <- c.memTotal.GetGauge()
+	ch <- c.memSys.GetGauge()
+	ch <- c.memHeapAlloc.GetGauge()
+	ch <- c.memHeapSys.GetGauge()
+	ch <- c.loadAverage.GetGauge()
+	ch <- c.openFDs.GetGauge()
+	ch <- c.netConns.GetGauge()
+	ch <- c.gcPause.GetHistogram()
+	ch <- c.gcCount.GetCounter()
+}
+
+// Stop 停止收集
+func (c *SystemCollector) Stop() {
+	close(c.stopCh)
 }
 
 // getLoadAverage 获取系统负载

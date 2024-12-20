@@ -11,6 +11,9 @@ type Config struct {
 	// metrics接口路径
 	Path string `mapstructure:"path" json:"path" yaml:"path"`
 
+	// 指标命名空间
+	Namespace string `mapstructure:"namespace" json:"namespace" yaml:"namespace"`
+
 	// 全局标签
 	Labels map[string]string `mapstructure:"labels" json:"labels" yaml:"labels"`
 
@@ -24,4 +27,14 @@ type Config struct {
 		// 采样率 0.0-1.0
 		Rate float64 `mapstructure:"rate" json:"rate" yaml:"rate"`
 	} `mapstructure:"sampling" json:"sampling" yaml:"sampling"`
+
+	// Prometheus配置
+	Prometheus *PrometheusConfig `mapstructure:"prometheus" json:"prometheus" yaml:"prometheus"`
+}
+
+// PrometheusConfig Prometheus配置
+type PrometheusConfig struct {
+	Enabled bool   `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	Port    int    `mapstructure:"port" json:"port" yaml:"port"`
+	Path    string `mapstructure:"path" json:"path" yaml:"path"`
 }

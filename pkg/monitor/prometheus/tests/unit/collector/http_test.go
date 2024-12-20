@@ -7,22 +7,39 @@ import (
 
 	"strings"
 
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestHTTPCollector(t *testing.T) {
-	t.Run("创建和注册HTTP指标收集器", func(t *testing.T) {
+	t.Run("指标注册和收集", func(t *testing.T) {
 		// Arrange
 		hc := collector.NewHTTPCollector("test")
 
-		// Act
-		err := prometheus.Register(hc)
-
-		// Assert
+		// 先注册收集器
+		err := hc.Register()
 		assert.NoError(t, err)
 
-		// Cleanup
+		// 添加测试数据
+		hc.ObserveRequest("GET", "/test", 200, 100*time.Millisecond, 1000, 2000)
+
+		// 验证指标收集
+		ch := make(chan prometheus.Metric, 10)
+		hc.Collect(ch)
+		close(ch)
+
+		// 验证指标
+		metrics := make([]prometheus.Metric, 0)
+		for m := range ch {
+			metrics = append(metrics, m)
+		}
+
+		// 验证是否包含所有必要的指标
+		assert.Greater(t, len(metrics), 0)
+
+		// 清理
 		prometheus.Unregister(hc)
 	})
 

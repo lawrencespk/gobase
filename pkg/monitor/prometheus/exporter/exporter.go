@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	dto "github.com/prometheus/client_model/go"
 )
 
 // Exporter Prometheus指标导出器
@@ -32,6 +34,9 @@ type Exporter struct {
 	once       sync.Once
 	stopChan   chan struct{}
 	metricPath string
+
+	// 自定义注册表
+	registry *prometheus.Registry
 }
 
 // New 创建导出器
@@ -73,68 +78,141 @@ func (e *Exporter) initCollectors() {
 
 // Start 启动指标导出服务
 func (e *Exporter) Start(ctx context.Context) error {
-	var err error
+	var startErr error
 	e.once.Do(func() {
+		// 创建新的注册表
+		e.registry = prometheus.NewRegistry()
+
 		// 注册所有收集器
-		if err = e.registerCollectors(); err != nil {
+		if err := e.registerCollectors(); err != nil {
+			startErr = err
 			return
 		}
 
-		// 创建HTTP服务
+		// 创建 HTTP 处理器
 		mux := http.NewServeMux()
-		mux.Handle(e.metricPath, promhttp.Handler())
+
+		// 使用自定义注册表创建处理器
+		handler := promhttp.HandlerFor(e.registry, promhttp.HandlerOpts{})
+		mux.Handle(e.metricPath, handler)
+
+		// 添加查询处理器
+		mux.Handle("/api/v1/query", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			query := r.URL.Query().Get("query")
+			if query == "" {
+				http.Error(w, "missing query parameter", http.StatusBadRequest)
+				return
+			}
+
+			// 从注册表中获取指标
+			gatheredMetrics, err := e.registry.Gather()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			// 查找匹配的指标
+			var matchedMetric *dto.Metric
+			var matchedValue float64
+			for _, mf := range gatheredMetrics {
+				if *mf.Name == query {
+					if len(mf.Metric) > 0 && mf.Metric[0].Counter != nil {
+						matchedMetric = mf.Metric[0]
+						matchedValue = *matchedMetric.Counter.Value
+						break
+					}
+				}
+			}
+
+			// 构造标签映射
+			labels := make(map[string]string)
+			if matchedMetric != nil {
+				for _, label := range matchedMetric.Label {
+					labels[*label.Name] = *label.Value
+				}
+			}
+
+			// 构造 Prometheus 格式的响应
+			result := map[string]interface{}{
+				"data": map[string]interface{}{
+					"resultType": "vector",
+					"result": []map[string]interface{}{
+						{
+							"metric": labels,
+							"value": []interface{}{
+								float64(time.Now().Unix()),
+								fmt.Sprintf("%g", matchedValue),
+							},
+						},
+					},
+				},
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(result); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+		}))
 
 		e.server = &http.Server{
 			Addr:    fmt.Sprintf(":%d", e.cfg.Port),
 			Handler: mux,
 		}
 
-		// 启动服务
+		// 启动服务器
 		e.log.Infof(ctx, "Starting prometheus metrics server on port %d", e.cfg.Port)
-		if err := e.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			e.log.Errorf(ctx, "Prometheus metrics server error: %v", err)
-		}
+		go func() {
+			if err := e.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				e.log.Errorf(ctx, "Prometheus metrics server error: %v", err)
+			}
+		}()
 
 		// 启动系统指标收集
 		if e.runtimeCollector != nil {
 			go e.collectSystemMetrics(ctx)
 		}
+
+		// 等待服务器启动
+		time.Sleep(100 * time.Millisecond)
 	})
 
-	return err
+	return startErr
 }
 
 // Stop 停止指标导出服务
 func (e *Exporter) Stop(ctx context.Context) error {
 	close(e.stopChan)
 	if e.server != nil {
-		return e.server.Shutdown(ctx)
+		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		return e.server.Shutdown(shutdownCtx)
 	}
 	return nil
 }
 
 // registerCollectors 注册所有收集器
 func (e *Exporter) registerCollectors() error {
+	// 使用自定义注册表而不是默认注册表
 	if e.httpCollector != nil {
-		if err := e.httpCollector.Register(); err != nil {
+		if err := e.registry.Register(e.httpCollector); err != nil {
 			return errors.Wrap(err, "failed to register http collector")
 		}
 	}
 
 	if e.runtimeCollector != nil {
-		if err := e.runtimeCollector.Register(); err != nil {
+		if err := e.registry.Register(e.runtimeCollector); err != nil {
 			return errors.Wrap(err, "failed to register runtime collector")
 		}
 	}
 
 	if e.resourceCollector != nil {
-		if err := e.resourceCollector.Register(); err != nil {
+		if err := e.registry.Register(e.resourceCollector); err != nil {
 			return errors.Wrap(err, "failed to register resource collector")
 		}
 	}
 
 	if e.businessCollector != nil {
-		if err := e.businessCollector.Register(); err != nil {
+		if err := e.registry.Register(e.businessCollector); err != nil {
 			return errors.Wrap(err, "failed to register business collector")
 		}
 	}
@@ -195,6 +273,11 @@ func validateConfig(cfg *configTypes.Config) error {
 
 	if cfg.Path == "" {
 		return errors.NewConfigError("metrics path cannot be empty", nil)
+	}
+
+	// 确保路径以 "/" 开头
+	if cfg.Path[0] != '/' {
+		cfg.Path = "/" + cfg.Path
 	}
 
 	return nil

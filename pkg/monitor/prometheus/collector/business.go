@@ -65,20 +65,8 @@ func NewBusinessCollector(namespace string) *BusinessCollector {
 
 // Register 注册所有业务指标
 func (c *BusinessCollector) Register() error {
-	collectors := []interface{}{
-		c.operationTotal,
-		c.operationDuration,
-		c.operationErrors,
-		c.queueSize,
-		c.processRate,
-	}
-
-	for _, collector := range collectors {
-		if err := collector.(interface{ Register() error }).Register(); err != nil {
-			return err
-		}
-	}
-	return nil
+	// 直接注册 BusinessCollector 本身，而不是单独注册每个指标
+	return prometheus.Register(c)
 }
 
 // ObserveOperation 观察业务操作

@@ -78,24 +78,38 @@ func NewHTTPCollector(namespace string) *HTTPCollector {
 
 // Register 注册所有指标
 func (c *HTTPCollector) Register() error {
-	if err := c.requestTotal.Register(); err != nil {
-		return err
+	// 先注册各个指标
+	if c.requestTotal != nil {
+		if err := c.requestTotal.Register(); err != nil {
+			return fmt.Errorf("failed to register request total: %w", err)
+		}
 	}
-	if err := c.requestDuration.Register(); err != nil {
-		return err
+	if c.requestDuration != nil {
+		if err := c.requestDuration.Register(); err != nil {
+			return fmt.Errorf("failed to register request duration: %w", err)
+		}
 	}
-	if err := c.activeRequests.Register(); err != nil {
-		return err
+	if c.activeRequests != nil {
+		if err := c.activeRequests.Register(); err != nil {
+			return fmt.Errorf("failed to register active requests: %w", err)
+		}
 	}
-	if err := c.requestSize.Register(); err != nil {
-		return err
+	if c.requestSize != nil {
+		if err := c.requestSize.Register(); err != nil {
+			return fmt.Errorf("failed to register request size: %w", err)
+		}
 	}
-	if err := c.responseSize.Register(); err != nil {
-		return err
+	if c.responseSize != nil {
+		if err := c.responseSize.Register(); err != nil {
+			return fmt.Errorf("failed to register response size: %w", err)
+		}
 	}
-	if err := c.slowRequests.Register(); err != nil {
-		return err
+	if c.slowRequests != nil {
+		if err := c.slowRequests.Register(); err != nil {
+			return fmt.Errorf("failed to register slow requests: %w", err)
+		}
 	}
+
 	return nil
 }
 
@@ -126,32 +140,46 @@ func (c *HTTPCollector) ObserveSlowRequest(method, path string, duration time.Du
 
 // Describe 实现 prometheus.Collector 接口
 func (c *HTTPCollector) Describe(ch chan<- *prometheus.Desc) {
-	collectors := []prometheus.Collector{
-		c.requestTotal.GetCollector(),
-		c.requestDuration.GetCollector(),
-		c.activeRequests.GetCollector(),
-		c.requestSize.GetCollector(),
-		c.responseSize.GetCollector(),
-		c.slowRequests.GetCollector(),
+	// 直接使用各个指标的 Describe 方法
+	if c.requestTotal != nil {
+		c.requestTotal.Describe(ch)
 	}
-
-	for _, collector := range collectors {
-		collector.Describe(ch)
+	if c.requestDuration != nil {
+		c.requestDuration.Describe(ch)
+	}
+	if c.activeRequests != nil {
+		c.activeRequests.Describe(ch)
+	}
+	if c.requestSize != nil {
+		c.requestSize.Describe(ch)
+	}
+	if c.responseSize != nil {
+		c.responseSize.Describe(ch)
+	}
+	if c.slowRequests != nil {
+		c.slowRequests.Describe(ch)
 	}
 }
 
 // Collect 实现 prometheus.Collector 接口
 func (c *HTTPCollector) Collect(ch chan<- prometheus.Metric) {
-	collectors := []prometheus.Collector{
-		c.requestTotal.GetCollector(),
-		c.requestDuration.GetCollector(),
-		c.activeRequests.GetCollector(),
-		c.requestSize.GetCollector(),
-		c.responseSize.GetCollector(),
-		c.slowRequests.GetCollector(),
+	// 直接使用各个指标的 Collect 方法
+	if c.requestTotal != nil {
+		c.requestTotal.Collect(ch)
 	}
-
-	for _, collector := range collectors {
-		collector.Collect(ch)
+	if c.requestDuration != nil {
+		c.requestDuration.Collect(ch)
+	}
+	if c.activeRequests != nil {
+		c.activeRequests.Collect(ch)
+	}
+	if c.requestSize != nil {
+		c.requestSize.Collect(ch)
+	}
+	if c.responseSize != nil {
+		c.responseSize.Collect(ch)
+	}
+	if c.slowRequests != nil {
+		c.slowRequests.Collect(ch)
 	}
 }
