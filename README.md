@@ -25,3 +25,12 @@
 ### 8. 链路追踪
 [链路追踪文档](/pkg/trace/jaeger/README.md)
 
+### 9. Prometheus 监控
+[Prometheus 监控文档](/pkg/monitor/prometheus/README.md)
+
+### 10. Grafana 监控
+[Grafana 监控文档](/pkg/monitor/grafana/README.md)
+
+
+
+
