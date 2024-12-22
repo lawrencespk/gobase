@@ -36,6 +36,10 @@ func (g *Gauge) WithLabels(labels []string) *Gauge {
 
 // Inc 仪表盘加1
 func (g *Gauge) Inc() {
+	if g.vec != nil {
+		g.vec.WithLabelValues().Inc()
+		return
+	}
 	if g.gauge != nil {
 		g.gauge.Inc()
 	}
@@ -43,6 +47,10 @@ func (g *Gauge) Inc() {
 
 // Dec 仪表盘减1
 func (g *Gauge) Dec() {
+	if g.vec != nil {
+		g.vec.WithLabelValues().Dec()
+		return
+	}
 	if g.gauge != nil {
 		g.gauge.Dec()
 	}
@@ -50,6 +58,10 @@ func (g *Gauge) Dec() {
 
 // Add 仪表盘增加指定值
 func (g *Gauge) Add(val float64) {
+	if g.vec != nil {
+		g.vec.WithLabelValues().Add(val)
+		return
+	}
 	if g.gauge != nil {
 		g.gauge.Add(val)
 	}
@@ -57,6 +69,10 @@ func (g *Gauge) Add(val float64) {
 
 // Sub 仪表盘减少指定值
 func (g *Gauge) Sub(val float64) {
+	if g.vec != nil {
+		g.vec.WithLabelValues().Sub(val)
+		return
+	}
 	if g.gauge != nil {
 		g.gauge.Sub(val)
 	}
@@ -64,6 +80,10 @@ func (g *Gauge) Sub(val float64) {
 
 // Set 仪表盘设置指定值
 func (g *Gauge) Set(val float64) {
+	if g.vec != nil {
+		g.vec.WithLabelValues().Set(val)
+		return
+	}
 	if g.gauge != nil {
 		g.gauge.Set(val)
 	}

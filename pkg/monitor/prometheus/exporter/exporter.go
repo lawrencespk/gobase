@@ -28,6 +28,7 @@ type Exporter struct {
 	runtimeCollector  *collector.RuntimeCollector
 	resourceCollector *collector.ResourceCollector
 	businessCollector *collector.BusinessCollector
+	systemCollector   *collector.SystemCollector
 
 	// HTTP服务
 	server     *http.Server
@@ -72,6 +73,8 @@ func (e *Exporter) initCollectors() {
 			e.resourceCollector = collector.NewResourceCollector(namespace)
 		case "business":
 			e.businessCollector = collector.NewBusinessCollector(namespace)
+		case "system":
+			e.systemCollector = collector.NewSystemCollector()
 		}
 	}
 }
@@ -168,7 +171,7 @@ func (e *Exporter) Start(ctx context.Context) error {
 		}()
 
 		// 启动系统指标收集
-		if e.runtimeCollector != nil {
+		if e.runtimeCollector != nil || e.systemCollector != nil {
 			go e.collectSystemMetrics(ctx)
 		}
 
@@ -214,6 +217,12 @@ func (e *Exporter) registerCollectors() error {
 	if e.businessCollector != nil {
 		if err := e.registry.Register(e.businessCollector); err != nil {
 			return errors.Wrap(err, "failed to register business collector")
+		}
+	}
+
+	if e.systemCollector != nil {
+		if err := e.registry.Register(e.systemCollector); err != nil {
+			return errors.Wrap(err, "failed to register system collector")
 		}
 	}
 

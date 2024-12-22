@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/net"
 	"github.com/shirou/gopsutil/v3/process"
 )
@@ -38,6 +40,9 @@ type SystemCollector struct {
 	// GC相关指标
 	gcPause *metric.Histogram // GC暂停时间
 	gcCount *metric.Counter   // GC次数
+
+	// 修改内存指标名称以匹配测试用例
+	memoryUsage *metric.Gauge // 系统内存使用量
 
 	// 添加停止通道
 	stopCh chan struct{}
@@ -109,75 +114,21 @@ func NewSystemCollector() *SystemCollector {
 			Name:      "gc_count_total",
 			Help:      "Total number of GC cycles",
 		}),
+		memoryUsage: metric.NewGauge(prometheus.GaugeOpts{
+			Namespace: "system",
+			Name:      "memory_usage_bytes",
+			Help:      "System memory usage in bytes",
+			ConstLabels: prometheus.Labels{
+				"type": "system",
+			},
+		}),
 		stopCh: make(chan struct{}),
 	}
 
-	// 立即开始收集数据
-	go c.startCollecting()
 	return c
 }
 
-// startCollecting 开始持续收集系统指标
-func (c *SystemCollector) startCollecting() {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-c.stopCh:
-			return
-		case <-ticker.C:
-			c.collect()
-		}
-	}
-}
-
-// collect 收集当前系统指标
-func (c *SystemCollector) collect() error {
-	// 收集CPU使用率
-	cpuPercent, err := cpu.Percent(0, false)
-	if err == nil && len(cpuPercent) > 0 {
-		c.cpuUsage.Set(cpuPercent[0])
-	}
-
-	// 收集goroutine数量
-	c.goroutines.Set(float64(runtime.NumGoroutine()))
-
-	// 收集内存统计
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-
-	c.memAlloc.Set(float64(memStats.Alloc))
-	c.memTotal.Set(float64(memStats.TotalAlloc))
-	c.memSys.Set(float64(memStats.Sys))
-	c.memHeapAlloc.Set(float64(memStats.HeapAlloc))
-	c.memHeapSys.Set(float64(memStats.HeapSys))
-
-	// 收集GC统计
-	c.gcCount.Add(float64(memStats.NumGC))
-	if memStats.NumGC > 0 {
-		c.gcPause.Observe(float64(memStats.PauseNs[(memStats.NumGC+255)%256]) / 1e9)
-	}
-
-	// 收集系统负载
-	if loadAvg, err := getLoadAverage(); err == nil {
-		c.loadAverage.Set(loadAvg)
-	}
-
-	// 收集文件描述符数量
-	if fds, err := getOpenFDs(); err == nil {
-		c.openFDs.Set(float64(fds))
-	}
-
-	// 收集网络连接数量
-	if conns, err := getNetConnections(); err == nil {
-		c.netConns.Set(float64(conns))
-	}
-
-	return nil
-}
-
-// Register 注册所有系统指标
+// Register 注册所有系统指标并启动收集
 func (c *SystemCollector) Register() error {
 	collectors := []prometheus.Collector{
 		c.cpuUsage,
@@ -192,15 +143,97 @@ func (c *SystemCollector) Register() error {
 		c.netConns,
 		c.gcPause,
 		c.gcCount,
+		c.memoryUsage,
 	}
 
+	// 注册所有收集器
 	for _, collector := range collectors {
 		if err := prometheus.Register(collector); err != nil {
-			// 如果已经注册，则跳过
-			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
-				return err
-			}
+			return fmt.Errorf("注册指标失败: %v", err)
 		}
+	}
+
+	// 立即执行一次收集
+	if err := c.collect(); err != nil {
+		return fmt.Errorf("首次收集系统指标失败: %v", err)
+	}
+
+	// 启动定期收集
+	go c.run()
+
+	return nil
+}
+
+// run 运行指标收集循环
+func (c *SystemCollector) run() {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := c.collect(); err != nil {
+				// 使用统一的日志处理
+				// TODO: 如果需要日志处理方式，请提供相关代码
+			}
+		case <-c.stopCh:
+			return
+		}
+	}
+}
+
+// Stop 停止收集
+func (c *SystemCollector) Stop() {
+	close(c.stopCh)
+}
+
+// collect 收集所有系统指标
+func (c *SystemCollector) collect() error {
+	// 收集 CPU 使用率
+	if cpuPercent, err := cpu.Percent(0, false); err == nil && len(cpuPercent) > 0 {
+		c.cpuUsage.Set(cpuPercent[0])
+	}
+
+	// 收集 goroutine 数量
+	c.goroutines.Set(float64(runtime.NumGoroutine()))
+
+	// 收集内存指标
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	c.memAlloc.Set(float64(m.Alloc))
+	c.memTotal.Set(float64(m.TotalAlloc))
+	c.memSys.Set(float64(m.Sys))
+	c.memHeapAlloc.Set(float64(m.HeapAlloc))
+	c.memHeapSys.Set(float64(m.HeapSys))
+
+	// 收集系统内存使用情况
+	vmStat, err := mem.VirtualMemory()
+	if err != nil {
+		return fmt.Errorf("获取系统内存信息失败: %v", err)
+	}
+
+	// 设置系统内存使用量 (单位：字节)
+	c.memoryUsage.Set(float64(vmStat.Used))
+
+	// 收集 GC 统计
+	c.gcCount.Add(float64(m.NumGC))
+	if m.NumGC > 0 {
+		c.gcPause.Observe(float64(m.PauseNs[(m.NumGC+255)%256]) / 1e9)
+	}
+
+	// 收集系统负载
+	if loadAvg, err := getLoadAverage(); err == nil {
+		c.loadAverage.Set(loadAvg)
+	}
+
+	// 收集文件描述符数量
+	if fds, err := getOpenFDs(); err == nil {
+		c.openFDs.Set(float64(fds))
+	}
+
+	// 收集网络连接数量
+	if conns, err := c.getNetworkConnections(); err == nil {
+		c.netConns.Set(float64(conns))
 	}
 
 	return nil
@@ -209,21 +242,21 @@ func (c *SystemCollector) Register() error {
 // Describe 实现 prometheus.Collector 接口
 func (c *SystemCollector) Describe(ch chan<- *prometheus.Desc) {
 	collectors := []prometheus.Collector{
-		c.cpuUsage.GetCollector(),
-		c.goroutines.GetCollector(),
-		c.memAlloc.GetCollector(),
-		c.memTotal.GetCollector(),
-		c.memSys.GetCollector(),
-		c.memHeapAlloc.GetCollector(),
-		c.memHeapSys.GetCollector(),
-		c.loadAverage.GetCollector(),
-		c.openFDs.GetCollector(),
-		c.netConns.GetCollector(),
-		c.gcPause.GetCollector(),
-		c.gcCount.GetCollector(),
+		c.memAlloc,
+		c.memTotal,
+		c.memSys,
+		c.memHeapAlloc,
+		c.memHeapSys,
+		c.cpuUsage,
+		c.goroutines,
+		c.gcPause,
+		c.gcCount,
+		c.loadAverage,
+		c.openFDs,
+		c.netConns,
+		c.memoryUsage,
 	}
 
-	// 顺序执行 Describe，避免并发问题
 	for _, collector := range collectors {
 		collector.Describe(ch)
 	}
@@ -231,24 +264,47 @@ func (c *SystemCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect 实现 prometheus.Collector 接口
 func (c *SystemCollector) Collect(ch chan<- prometheus.Metric) {
-	// 使用底层的 prometheus metric
-	ch <- c.cpuUsage.GetGauge()
-	ch <- c.goroutines.GetGauge()
-	ch <- c.memAlloc.GetGauge()
-	ch <- c.memTotal.GetGauge()
-	ch <- c.memSys.GetGauge()
-	ch <- c.memHeapAlloc.GetGauge()
-	ch <- c.memHeapSys.GetGauge()
-	ch <- c.loadAverage.GetGauge()
-	ch <- c.openFDs.GetGauge()
-	ch <- c.netConns.GetGauge()
-	ch <- c.gcPause.GetHistogram()
-	ch <- c.gcCount.GetCounter()
-}
+	// 收集 CPU 使用率
+	if cpuPercent, err := cpu.Percent(0, false); err == nil && len(cpuPercent) > 0 {
+		c.cpuUsage.Set(cpuPercent[0])
+	}
 
-// Stop 停止收集
-func (c *SystemCollector) Stop() {
-	close(c.stopCh)
+	// 收集内存指标
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	// 设置内存指标值
+	c.memAlloc.Set(float64(memStats.Alloc))
+	c.memTotal.Set(float64(memStats.TotalAlloc))
+	c.memSys.Set(float64(memStats.Sys))
+	c.memHeapAlloc.Set(float64(memStats.HeapAlloc))
+	c.memHeapSys.Set(float64(memStats.HeapSys))
+
+	// 收集系统内存使用情况
+	if vmStat, err := mem.VirtualMemory(); err == nil {
+		c.memoryUsage.Set(float64(vmStat.Used))
+	}
+
+	// 收集所有指标
+	collectors := []prometheus.Collector{
+		c.cpuUsage,
+		c.memAlloc,
+		c.memTotal,
+		c.memSys,
+		c.memHeapAlloc,
+		c.memHeapSys,
+		c.goroutines,
+		c.gcPause,
+		c.gcCount,
+		c.loadAverage,
+		c.openFDs,
+		c.netConns,
+		c.memoryUsage,
+	}
+
+	for _, collector := range collectors {
+		collector.Collect(ch)
+	}
 }
 
 // getLoadAverage 获取系统负载
@@ -312,34 +368,53 @@ func getOpenFDs() (int, error) {
 	return int(fds), nil
 }
 
-// getNetConnections 获取网络连接数量
-func getNetConnections() (int, error) {
-	// 设置超时通道
-	done := make(chan struct{})
+// getNetworkConnections 获取网络连接数量
+func (c *SystemCollector) getNetworkConnections() (int, error) {
 	var (
-		conns []net.ConnectionStat
-		err   error
+		conns    []net.ConnectionStat
+		err      error
+		lastErr  error
+		done     = make(chan struct{})
+		canceled = make(chan struct{})
 	)
 
-	// 在goroutine中执行可能耗时的操作
-	go func() {
-		proc, procErr := process.NewProcess(int32(os.Getpid()))
-		if procErr == nil {
-			conns, err = proc.Connections()
-		} else {
-			err = procErr
-		}
-		close(done)
-	}()
+	const (
+		maxRetries  = 3
+		baseTimeout = 100 * time.Millisecond
+	)
 
-	// 等待结果或超时
-	select {
-	case <-done:
-		if err != nil {
-			return 0, fmt.Errorf("获取网络连接信息失败: %v", err)
+	for i := 0; i < maxRetries; i++ {
+		// 创建一个context用于控制goroutine
+		ctx, cancel := context.WithTimeout(context.Background(), baseTimeout*time.Duration(i+1))
+
+		go func() {
+			defer cancel() // 确保context被取消
+
+			proc, procErr := process.NewProcess(int32(os.Getpid()))
+			if procErr == nil {
+				conns, err = proc.Connections()
+				close(done)
+			} else {
+				err = procErr
+				close(canceled)
+			}
+		}()
+
+		select {
+		case <-done:
+			if err != nil {
+				lastErr = fmt.Errorf("获取网络连接信息失败: %v", err)
+				continue
+			}
+			return len(conns), nil
+		case <-canceled:
+			lastErr = fmt.Errorf("获取进程信息失败: %v", err)
+			continue
+		case <-ctx.Done():
+			lastErr = fmt.Errorf("获取网络连接信息超时(尝试 %d/%d)", i+1, maxRetries)
+			continue
 		}
-		return len(conns), nil
-	case <-time.After(2 * time.Second): // 设置2秒超时
-		return 0, fmt.Errorf("获取网络连接信息超时")
 	}
+
+	return 0, lastErr
 }
