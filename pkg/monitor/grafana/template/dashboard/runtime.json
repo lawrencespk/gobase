@@ -1,0 +1,61 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "title": "Goroutines",
+      "type": "graph",
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "go_goroutines{job=\"$job\"}",
+          "legendFormat": "Goroutines"
+        }
+      ]
+    },
+    {
+      "title": "GC Duration",
+      "type": "graph",
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "rate(go_gc_duration_seconds_sum{job=\"$job\"}[5m])",
+          "legendFormat": "GC time/s"
+        }
+      ]
+    },
+    {
+      "title": "Heap Usage",
+      "type": "graph",
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        {
+          "expr": "go_memstats_heap_alloc_bytes{job=\"$job\"} / 1024 / 1024",
+          "legendFormat": "Heap Allocated (MB)"
+        },
+        {
+          "expr": "go_memstats_heap_sys_bytes{job=\"$job\"} / 1024 / 1024",
+          "legendFormat": "Heap System (MB)"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "type": "query",
+        "datasource": "${DS_PROMETHEUS}",
+        "query": "label_values(job)"
+      }
+    ]
+  },
+  "refresh": "10s",
+  "title": "Go Runtime Metrics",
+  "uid": "runtime_metrics",
+  "version": 1
+} 

@@ -25,6 +25,24 @@ groups:
           summary: Slow HTTP responses
           description: "95th percentile of response time is above 1s (current value: {{ $value }}s)"
 
+      - alert: HighLatency
+        expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High latency detected
+          description: "P99 latency is above 2s (current value: {{ $value }}s)"
+
+      - alert: HighTrafficSpike
+        expr: sum(rate(http_requests_total[5m])) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Traffic spike detected
+          description: "Request rate is above 1000 req/s (current value: {{ $value }})"
+
   - name: SystemAlerts
     rules:
       - alert: HighMemoryUsage
@@ -43,4 +61,42 @@ groups:
           severity: warning
         annotations:
           summary: High number of goroutines
-          description: "Number of goroutines is above 10k (current value: {{ $value }})" 
+          description: "Number of goroutines is above 10k (current value: {{ $value }})"
+
+      - alert: DiskSpaceRunningOut
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Low disk space
+          description: "Disk space is below 10% (current value: {{ $value }}%)"
+
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High CPU usage
+          description: "CPU usage is above 80% (current value: {{ $value }}%)"
+
+  - name: BusinessAlerts
+    rules:
+      - alert: HighBusinessErrorRate
+        expr: rate(business_operations_errors_total[5m]) / rate(business_operations_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: High business error rate
+          description: "Business error rate is above 5% (current value: {{ $value }})"
+
+      - alert: LowProcessRate
+        expr: rate(business_process_rate[5m]) < 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Low process rate
+          description: "Business process rate is below 10/s (current value: {{ $value }})" 
