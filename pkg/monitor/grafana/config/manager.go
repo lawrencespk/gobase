@@ -1,83 +1,86 @@
 package config
 
 import (
-	"fmt"
-	"path/filepath"
-	"sync"
-
+	"context"
+	"encoding/json"
+	"gobase/pkg/config"
+	configTypes "gobase/pkg/config/types"
 	"gobase/pkg/errors"
-	"gobase/pkg/logger/types"
+	loggerTypes "gobase/pkg/logger/types"
+
+	"gopkg.in/yaml.v2"
 )
 
 type Manager struct {
-	logger     types.Logger
-	configPath string
-	templates  map[string]string
-	mu         sync.RWMutex
+	cfg    *configTypes.Config
+	logger loggerTypes.Logger
 }
 
-func NewManager(configPath string, logger types.Logger) *Manager {
+func NewManager(cfg *configTypes.Config, logger loggerTypes.Logger) *Manager {
 	return &Manager{
-		logger:     logger,
-		configPath: configPath,
-		templates:  make(map[string]string),
+		cfg:    cfg,
+		logger: logger,
 	}
 }
 
-func (m *Manager) LoadTemplates() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+// GetDashboardConfig 获取仪表盘配置
+func (m *Manager) GetDashboardConfig(name string) (map[string]interface{}, error) {
+	var dashboardJSON string
 
-	// 加载所有仪表盘模板
-	dashboards, err := filepath.Glob(filepath.Join(m.configPath, "dashboard", "*.json"))
-	if err != nil {
-		return errors.NewConfigError(
-			fmt.Sprintf("failed to load dashboard templates: %v", err),
-			err,
-		)
+	switch name {
+	case "http":
+		dashboardJSON = m.cfg.Grafana.Dashboards.HTTP
+	case "logger":
+		dashboardJSON = m.cfg.Grafana.Dashboards.Logger
+	case "runtime":
+		dashboardJSON = m.cfg.Grafana.Dashboards.Runtime
+	case "system":
+		dashboardJSON = m.cfg.Grafana.Dashboards.System
+	default:
+		return nil, errors.NewConfigError("unknown dashboard: "+name, nil)
 	}
 
-	// 加载所有告警规则
-	rules, err := filepath.Glob(filepath.Join(m.configPath, "alert", "*.yaml"))
-	if err != nil {
-		return errors.NewConfigError(
-			fmt.Sprintf("failed to load alert rules: %v", err),
-			err,
-		)
+	var dashboard map[string]interface{}
+	if err := json.Unmarshal([]byte(dashboardJSON), &dashboard); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal dashboard config")
 	}
 
-	// 加载 Alertmanager 配置
-	alertmanager, err := filepath.Glob(filepath.Join(m.configPath, "alertmanager", "*.yaml"))
-	if err != nil {
-		return errors.NewConfigError(
-			fmt.Sprintf("failed to load alertmanager config: %v", err),
-			err,
-		)
-	}
-
-	// 合并所有模板
-	templates := append(dashboards, rules...)
-	templates = append(templates, alertmanager...)
-
-	for _, template := range templates {
-		name := filepath.Base(template)
-		m.templates[name] = template
-	}
-
-	return nil
+	return dashboard, nil
 }
 
-func (m *Manager) GetTemplate(name string) (string, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+// GetAlertRules 获取告警规则
+func (m *Manager) GetAlertRules() (map[string]interface{}, error) {
+	rulesYAML := m.cfg.Grafana.Alerts.Rules
+	loggerRulesYAML := m.cfg.Grafana.Alerts.Logger
 
-	template, ok := m.templates[name]
-	if !ok {
-		return "", errors.NewConfigError(
-			fmt.Sprintf("template not found: %s", name),
-			nil,
-		)
+	// 合并规则
+	var rules, loggerRules map[string]interface{}
+
+	if err := yaml.Unmarshal([]byte(rulesYAML), &rules); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal alert rules")
 	}
 
-	return template, nil
+	if err := yaml.Unmarshal([]byte(loggerRulesYAML), &loggerRules); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal logger alert rules")
+	}
+
+	// 合并规则组
+	rulesGroups := rules["groups"].([]interface{})
+	loggerGroups := loggerRules["groups"].([]interface{})
+	allGroups := append(rulesGroups, loggerGroups...)
+
+	return map[string]interface{}{
+		"groups": allGroups,
+	}, nil
+}
+
+// WatchConfig 监听配置变更
+func (m *Manager) WatchConfig(ctx context.Context) error {
+	// 使用 config 包提供的 Watch 函数
+	return config.Watch(ctx, m.cfg, func() {
+		m.logger.Info(ctx, "Grafana configuration updated", loggerTypes.Field{
+			Key:   "component",
+			Value: "grafana_config",
+		})
+	})
 }

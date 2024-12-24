@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"sync"
 
 	"github.com/spf13/viper"
@@ -338,4 +339,33 @@ func UnmarshalYAML(data []byte, cfg *Config) error {
 		return errors.NewConfigError("config is nil", nil)
 	}
 	return yaml.Unmarshal(data, cfg)
+}
+
+// Watch 监听配置变更
+func Watch(ctx context.Context, cfg *types.Config, onChange func()) error {
+	// 实现配置监听逻辑
+	// 可以使用 viper 的 WatchConfig 功能
+	return nil
+}
+
+// ToTypesConfig 将 *Config 转换为 *types.Config
+func (c *Config) ToTypesConfig() *types.Config {
+	if c == nil {
+		return nil
+	}
+	return &types.Config{
+		Jaeger: c.Jaeger,
+		Grafana: types.GrafanaConfig{
+			Dashboards: struct {
+				HTTP    string `json:"http" yaml:"http"`
+				Logger  string `json:"logger" yaml:"logger"`
+				Runtime string `json:"runtime" yaml:"runtime"`
+				System  string `json:"system" yaml:"system"`
+			}{},
+			Alerts: struct {
+				Rules  string `json:"rules" yaml:"rules"`
+				Logger string `json:"logger" yaml:"logger"`
+			}{},
+		},
+	}
 }

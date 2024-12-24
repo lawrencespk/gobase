@@ -141,43 +141,62 @@ func WithNacosTimeout(timeout time.Duration) ConfigOption {
 
 // JaegerConfig Jaeger配置
 type JaegerConfig struct {
-	Enable      bool                  `mapstructure:"enable" json:"enable" yaml:"enable"`
-	ServiceName string                `mapstructure:"service_name" json:"service_name" yaml:"service_name"`
-	Agent       JaegerAgentConfig     `mapstructure:"agent" json:"agent" yaml:"agent"`
-	Collector   JaegerCollectorConfig `mapstructure:"collector" json:"collector" yaml:"collector"`
-	Sampler     JaegerSamplerConfig   `mapstructure:"sampler" json:"sampler" yaml:"sampler"`
-	Tags        map[string]string     `mapstructure:"tags" json:"tags" yaml:"tags"`
-	Buffer      JaegerBufferConfig    `mapstructure:"buffer" json:"buffer" yaml:"buffer"`
+	Enable      bool                  `mapstructure:"enable" json:"enable" yaml:"enable"`                   // 是否启用
+	ServiceName string                `mapstructure:"service_name" json:"service_name" yaml:"service_name"` // 服务名称
+	Agent       JaegerAgentConfig     `mapstructure:"agent" json:"agent" yaml:"agent"`                      // Agent配置
+	Collector   JaegerCollectorConfig `mapstructure:"collector" json:"collector" yaml:"collector"`          // Collector配置
+	Sampler     JaegerSamplerConfig   `mapstructure:"sampler" json:"sampler" yaml:"sampler"`                // 采样配置
+	Tags        map[string]string     `mapstructure:"tags" json:"tags" yaml:"tags"`                         // 标签
+	Buffer      JaegerBufferConfig    `mapstructure:"buffer" json:"buffer" yaml:"buffer"`                   // 缓冲区配置
 }
 
 // JaegerAgentConfig Jaeger Agent配置
 type JaegerAgentConfig struct {
-	Host string `mapstructure:"host" json:"host" yaml:"host"`
-	Port string `mapstructure:"port" json:"port" yaml:"port"`
+	Host string `mapstructure:"host" json:"host" yaml:"host"` // 主机
+	Port string `mapstructure:"port" json:"port" yaml:"port"` // 端口
 }
 
 // JaegerCollectorConfig Jaeger Collector配置
 type JaegerCollectorConfig struct {
-	Endpoint string        `mapstructure:"endpoint" json:"endpoint" yaml:"endpoint"`
-	Username string        `mapstructure:"username" json:"username" yaml:"username"`
-	Password string        `mapstructure:"password" json:"password" yaml:"password"`
-	Timeout  time.Duration `mapstructure:"timeout" json:"timeout" yaml:"timeout"`
+	Endpoint string        `mapstructure:"endpoint" json:"endpoint" yaml:"endpoint"` // 端点
+	Username string        `mapstructure:"username" json:"username" yaml:"username"` // 用户名
+	Password string        `mapstructure:"password" json:"password" yaml:"password"` // 密码
+	Timeout  time.Duration `mapstructure:"timeout" json:"timeout" yaml:"timeout"`    // 超时时间
 }
 
 // JaegerSamplerConfig 采样配置
 type JaegerSamplerConfig struct {
-	Type            string  `mapstructure:"type" json:"type" yaml:"type"`
-	Param           float64 `mapstructure:"param" json:"param" yaml:"param"`
-	ServerURL       string  `mapstructure:"server_url" json:"server_url" yaml:"server_url"`
-	MaxOperations   int     `mapstructure:"max_operations" json:"max_operations" yaml:"max_operations"`
-	RefreshInterval int     `mapstructure:"refresh_interval" json:"refresh_interval" yaml:"refresh_interval"`
-	RateLimit       float64 `mapstructure:"rate_limit" json:"rate_limit" yaml:"rate_limit"`
-	Adaptive        bool    `mapstructure:"adaptive" json:"adaptive" yaml:"adaptive"`
+	Type            string  `mapstructure:"type" json:"type" yaml:"type"`                                     // 类型
+	Param           float64 `mapstructure:"param" json:"param" yaml:"param"`                                  // 参数
+	ServerURL       string  `mapstructure:"server_url" json:"server_url" yaml:"server_url"`                   // 服务器URL
+	MaxOperations   int     `mapstructure:"max_operations" json:"max_operations" yaml:"max_operations"`       // 最大操作数
+	RefreshInterval int     `mapstructure:"refresh_interval" json:"refresh_interval" yaml:"refresh_interval"` // 刷新间隔
+	RateLimit       float64 `mapstructure:"rate_limit" json:"rate_limit" yaml:"rate_limit"`                   // 速率限制
+	Adaptive        bool    `mapstructure:"adaptive" json:"adaptive" yaml:"adaptive"`                         // 是否自适应
 }
 
 // JaegerBufferConfig 缓冲区配置
 type JaegerBufferConfig struct {
-	Enable        bool          `mapstructure:"enable" json:"enable" yaml:"enable"`
-	Size          int           `mapstructure:"size" json:"size" yaml:"size"`
-	FlushInterval time.Duration `mapstructure:"flush_interval" json:"flush_interval" yaml:"flush_interval"`
+	Enable        bool          `mapstructure:"enable" json:"enable" yaml:"enable"`                         // 是否启用
+	Size          int           `mapstructure:"size" json:"size" yaml:"size"`                               // 大小
+	FlushInterval time.Duration `mapstructure:"flush_interval" json:"flush_interval" yaml:"flush_interval"` // 刷新间隔
+}
+
+type GrafanaConfig struct {
+	Dashboards struct {
+		HTTP    string `json:"http" yaml:"http"`       // HTTP仪表盘配置
+		Logger  string `json:"logger" yaml:"logger"`   // 日志仪表盘配置
+		Runtime string `json:"runtime" yaml:"runtime"` // 运行时仪表盘配置
+		System  string `json:"system" yaml:"system"`   // 系统仪表盘配置
+	} `json:"dashboards" yaml:"dashboards"`
+
+	Alerts struct {
+		Rules  string `json:"rules" yaml:"rules"`   // 通用告警规则
+		Logger string `json:"logger" yaml:"logger"` // 日志告警规则
+	} `json:"alerts" yaml:"alerts"`
+}
+
+type Config struct {
+	Jaeger  JaegerConfig  `json:"jaeger" yaml:"jaeger" mapstructure:"jaeger"`    // Jaeger配置
+	Grafana GrafanaConfig `json:"grafana" yaml:"grafana" mapstructure:"grafana"` // Grafana配置
 }

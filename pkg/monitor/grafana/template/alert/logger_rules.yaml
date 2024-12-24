@@ -1,0 +1,42 @@
+groups:
+  - name: LoggerAlerts
+    rules:
+      # 日志错误率告警
+      - alert: HighLogErrorRate
+        expr: sum(rate(log_entries_total{level="error"}[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "高错误日志率"
+          description: "最近5分钟错误日志率超过10条/分钟"
+
+      # ELK写入错误告警  
+      - alert: ELKWriteErrors
+        expr: rate(elk_errors_total{operation="add"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ELK写入错误"
+          description: "ELK写入出现错误,请检查连接状态"
+
+      # 日志处理延迟告警
+      - alert: HighLogProcessingLatency
+        expr: rate(log_processing_duration_seconds_sum[5m]) / rate(log_processing_duration_seconds_count[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "日志处理延迟过高"
+          description: "日志处理平均延迟超过1秒"
+
+      # 日志队列积压告警
+      - alert: LogQueueBacklog
+        expr: log_queue_size > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "日志队列积压"
+          description: "日志队列大小超过1000,可能存在处理瓶颈" 

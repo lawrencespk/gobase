@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"gobase/pkg/monitor/prometheus/metrics"
 )
 
 // 定义错误变量
@@ -81,6 +83,9 @@ func NewWriteQueue(writer Writer, config QueueConfig) (*WriteQueue, error) {
 
 // Write 写入数据
 func (q *WriteQueue) Write(p []byte) (n int, err error) {
+	// 更新队列大小指标
+	metrics.LogQueueSize.Set(float64(len(q.queue)))
+
 	// 检查队列是否正在运行
 	if atomic.LoadInt32(&q.running) == 0 {
 		return 0, errors.NewOperationFailedError("queue not running", nil)

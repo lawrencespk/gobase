@@ -1,0 +1,29 @@
+grafana:
+  dashboards:
+    http: |
+      {
+        // http.json 的内容
+      }
+    logger: |
+      {
+        // logger.json 的内容
+      }
+    runtime: |
+      {
+        // runtime.json 的内容
+      }
+    system: |
+      {
+        // system.json 的内容
+      }
+  alerts:
+    rules: |
+      groups:
+        - name: HttpAlerts
+          rules:
+            // rules.yaml 的内容
+    logger: |
+      groups:
+        - name: LoggerAlerts
+          rules:
+            // logger_rules.yaml 的内容 

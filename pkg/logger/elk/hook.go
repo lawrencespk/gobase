@@ -10,6 +10,7 @@ import (
 
 	"gobase/pkg/errors"
 	"gobase/pkg/errors/codes"
+	"gobase/pkg/monitor/prometheus/metrics"
 )
 
 // ElkHook 实现 logrus.Hook 接口
@@ -140,6 +141,14 @@ func (h *ElkHook) Levels() []logrus.Level {
 
 // Fire 实现 logrus.Hook 接口
 func (h *ElkHook) Fire(entry *logrus.Entry) error {
+	start := time.Now()
+	defer func() {
+		metrics.LogLatency.WithLabelValues("elk_write").Observe(time.Since(start).Seconds())
+	}()
+
+	// 更新批处理大小
+	metrics.ElkBatchSize.Set(float64(h.processor.Stats().TotalDocuments))
+
 	// 创建日志文档
 	doc := map[string]interface{}{
 		"level": entry.Level.String(),
@@ -165,6 +174,7 @@ func (h *ElkHook) Fire(entry *logrus.Entry) error {
 
 	// 使用批量处理器添加文档对象
 	if err := h.processor.Add(h.ctx, h.index, doc); err != nil {
+		metrics.ElkErrorCounter.WithLabelValues("add").Inc()
 		h.errorLogger.WithError(err).Error("failed to add log entry to bulk processor")
 		return errors.WrapWithCode(err, codes.ELKBulkError, "failed to add log entry")
 	}

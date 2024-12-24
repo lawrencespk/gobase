@@ -4,6 +4,9 @@ import (
 	"context"
 	"gobase/pkg/errors"
 	"gobase/pkg/logger/elk"
+	"time"
+
+	"gobase/pkg/monitor/prometheus/metrics"
 
 	"github.com/sirupsen/logrus"
 )
@@ -35,6 +38,15 @@ func (h *Hook) SetLevels(levels []logrus.Level) {
 
 // Fire 将日志条目写入 Elasticsearch
 func (h *Hook) Fire(entry *logrus.Entry) error {
+	// 记录日志计数
+	metrics.LogCounter.WithLabelValues(entry.Level.String()).Inc()
+
+	start := time.Now()
+	defer func() {
+		// 记录处理延迟
+		metrics.LogLatency.WithLabelValues("write").Observe(time.Since(start).Seconds())
+	}()
+
 	// 将日志条目转换为文档
 	document := map[string]interface{}{
 		"level":   entry.Level.String(), // 日志级别
