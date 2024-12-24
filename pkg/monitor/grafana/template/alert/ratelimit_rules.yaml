@@ -1,0 +1,52 @@
+groups:
+  - name: RateLimitAlerts
+    rules:
+      # 高拒绝率告警
+      - alert: HighRejectionRate
+        expr: rate(gobase_ratelimit_rejected_total[5m]) / rate(gobase_ratelimit_requests_total[5m]) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "限流器拒绝率过高"
+          description: "{{ $labels.key }} 的请求拒绝率超过30%，当前值: {{ $value | printf \"%.2f\" }}"
+
+      # 限流器延迟告警
+      - alert: HighLimiterLatency
+        expr: histogram_quantile(0.95, rate(gobase_ratelimit_latency_seconds_bucket[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "限流器延迟过高"
+          description: "{{ $labels.key }} 的P95延迟超过100ms，当前值: {{ $value | printf \"%.2f\" }}s"
+
+      # 等待队列积压告警
+      - alert: LargeWaitingQueue
+        expr: gobase_ratelimit_waiting_queue_size > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "等待队列积压"
+          description: "{{ $labels.key }} 的等待队列大小超过1000，当前值: {{ $value }}"
+
+      # 活跃限流器数量异常告警
+      - alert: UnexpectedActiveLimiters
+        expr: delta(gobase_ratelimit_active_limiters[1h]) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "活跃限流器数量异常增长"
+          description: "{{ $labels.type }} 类型的活跃限流器在1小时内增长超过100个"
+
+      # 限流器饱和度告警
+      - alert: LimiterSaturation
+        expr: rate(gobase_ratelimit_requests_total{result="rejected"}[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "限流器饱和"
+          description: "{{ $labels.key }} 每分钟拒绝超过100个请求，可能需要调整限流策略" 
