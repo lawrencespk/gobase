@@ -1,0 +1,10 @@
+接下来我们需要完成：
+
+1. Ratelimit的README文档,
+2. Redis的README文档,
+3. JWT
+4. Concul
+5. Kafka
+
+在开始之前我们需要先确认, RateLimit是否需要开发成中间件,
+另外Redis是不是需要中间件?
