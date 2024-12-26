@@ -9,6 +9,8 @@ import (
 
 	"gobase/pkg/cache/redis/client"
 	"gobase/pkg/cache/redis/config/types"
+	"gobase/pkg/ratelimit/core"
+	"gobase/pkg/ratelimit/redis"
 )
 
 // SetupRedisClient 创建用于测试的Redis客户端
@@ -47,4 +49,12 @@ func SetupRedisClient(t *testing.T) client.Client {
 	require.Error(t, err) // 应该返回key不存在的错误,这也说明连接是正常的
 
 	return redisClient
+}
+
+// NewRedisLimiter 创建Redis限流器实例
+func NewRedisLimiter(client client.Client) core.Limiter {
+	return redis.NewSlidingWindowLimiter(client,
+		core.WithName("test_limiter"),
+		core.WithAlgorithm("sliding_window"),
+	)
 }

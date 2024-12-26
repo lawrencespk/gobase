@@ -6,6 +6,7 @@ import (
 
 	"gobase/pkg/cache/redis/client"
 	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 	"gobase/pkg/logger"
 	"gobase/pkg/logger/types"
 	"gobase/pkg/monitor/prometheus/metric"
@@ -100,7 +101,7 @@ func (l *slidingWindowLimiter) AllowN(ctx context.Context, key string, n int64, 
 	now := time.Now().UnixMilli()
 	counterKey := key + ":counter"
 
-	// 清理过期的数据并增加计数
+	// 修改 Lua 脚本
 	script := `
         local key = KEYS[1]
         local counter_key = KEYS[2]
@@ -112,24 +113,29 @@ func (l *slidingWindowLimiter) AllowN(ctx context.Context, key string, n int64, 
         -- 清理过期数据
         redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
         
-        -- 原子递增计数器
-        local new_count = redis.call('INCRBY', counter_key, n)
+        -- 获取当前窗口内的请求总数
+        local total = 0
+        local members = redis.call('ZRANGE', key, 0, -1, 'WITHSCORES')
+        for i = 1, #members, 2 do
+            local count = tonumber(redis.call('HGET', counter_key, members[i]))
+            if count then
+                total = total + count
+            end
+        end
         
-        -- 如果超过限制，回滚计数并返回
-        if new_count > limit then
-            redis.call('DECRBY', counter_key, n)
+        -- 检查是否超过限制
+        if (total + n) > limit then
             return 0
         end
         
-        -- 添加新请求
-        for i = 1, n do
-            redis.call('ZADD', key, now, now .. ':' .. i)
-        end
+        -- 添加新请求记录
+        local member = tostring(now)
+        redis.call('ZADD', key, now, member)
+        redis.call('HINCRBY', counter_key, member, n)
         
         -- 设置过期时间
-        local expire_time = math.ceil(window/1000) + 1
-        redis.call('EXPIRE', key, expire_time)
-        redis.call('EXPIRE', counter_key, expire_time)
+        redis.call('EXPIRE', key, math.ceil(window/1000) + 1)
+        redis.call('EXPIRE', counter_key, math.ceil(window/1000) + 1)
         
         return 1
     `
@@ -169,45 +175,66 @@ func (l *slidingWindowLimiter) Wait(ctx context.Context, key string, limit int64
 		metrics.Collector.ObserveLatency(key, "wait", time.Since(start).Seconds())
 	}()
 
-	l.log.Debug(ctx, "starting wait for rate limit",
-		types.Field{Key: "key", Value: key},
-		types.Field{Key: "limit", Value: limit},
-		types.Field{Key: "window", Value: window},
-	)
+	// 获取 context 的截止时间
+	deadline, hasDeadline := ctx.Deadline()
+	maxWaitTime := window // 默认最大等待时间为一个完整窗口
+	if hasDeadline {
+		if remaining := time.Until(deadline); remaining < window {
+			maxWaitTime = remaining
+		}
+	}
 
-	waitingCount := float64(0)
-	defer func() {
-		metrics.Collector.SetWaitingQueueSize(key, waitingCount)
-	}()
+	// 调整基础睡眠时间计算
+	baseSleep := window / time.Duration(limit*2) // 增加基础等待时间
+	if baseSleep < time.Millisecond {
+		baseSleep = time.Millisecond
+	}
+	maxSleep := window / 4 // 增加最大等待时间
+
+	retryCount := 0
+	totalWaitTime := time.Duration(0)
 
 	for {
 		select {
 		case <-ctx.Done():
-			l.log.Debug(ctx, "wait cancelled by context",
-				types.Field{Key: "key", Value: key},
-				types.Field{Key: "error", Value: ctx.Err()},
-			)
 			return ctx.Err()
 		default:
-			waitingCount++
-			metrics.Collector.SetWaitingQueueSize(key, waitingCount)
-
 			allowed, err := l.Allow(ctx, key, limit, window)
 			if err != nil {
-				l.log.Error(ctx, "error while waiting for rate limit",
-					types.Field{Key: "error", Value: err},
-					types.Field{Key: "key", Value: key},
-				)
 				return err
 			}
 			if allowed {
-				l.log.Debug(ctx, "rate limit wait completed",
-					types.Field{Key: "key", Value: key},
-					types.Field{Key: "waited_cycles", Value: waitingCount},
-				)
 				return nil
 			}
-			time.Sleep(100 * time.Millisecond)
+
+			// 检查总等待时间是否超过最大等待时间
+			if totalWaitTime >= maxWaitTime {
+				return errors.NewError(codes.TooManyRequests, "wait timeout exceeded", nil)
+			}
+
+			// 使用指数退避策略，但有最大值限制
+			sleepTime := baseSleep * time.Duration(1<<uint(retryCount))
+			if sleepTime > maxSleep {
+				sleepTime = maxSleep
+			}
+
+			// 确保不会超过最大等待时间
+			if totalWaitTime+sleepTime > maxWaitTime {
+				sleepTime = maxWaitTime - totalWaitTime
+			}
+
+			retryCount++
+			totalWaitTime += sleepTime
+			metrics.Collector.SetWaitingQueueSize(key, float64(retryCount))
+
+			timer := time.NewTimer(sleepTime)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+				continue
+			}
 		}
 	}
 }
@@ -218,7 +245,10 @@ func (l *slidingWindowLimiter) Reset(ctx context.Context, key string) error {
 		types.Field{Key: "key", Value: key},
 	)
 
-	err := l.client.Del(ctx, key)
+	counterKey := key + ":counter"
+
+	// 删除主key和计数器key
+	err := l.client.Del(ctx, key, counterKey)
 	if err != nil {
 		l.log.Error(ctx, "failed to reset rate limiter",
 			types.Field{Key: "error", Value: err},
