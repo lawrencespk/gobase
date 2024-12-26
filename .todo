@@ -1,6 +1,6 @@
 接下来我们需要完成：
 
-1. Ratelimit的README文档,
+1. Ratelimit的README文档 -done
 2. Redis的README文档,
 3. JWT
 4. Concul
