@@ -110,3 +110,11 @@ func FormatErrorChain(err error) string {
 	}
 	return result
 }
+
+// AsError 将标准 error 转换为自定义 Error 类型
+func AsError(err error) types.Error {
+	if customErr, ok := err.(types.Error); ok {
+		return customErr
+	}
+	return NewSystemError(err.Error(), err).(types.Error)
+}

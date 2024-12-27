@@ -31,6 +31,15 @@
 ### 10. Grafana 监控
 [Grafana 监控文档](/pkg/monitor/grafana/README.md)
 
+### 11. Ratelimit 限流
+[Ratelimit 限流文档](/pkg/ratelimit/README.md)
 
+### 12. Ratelimit 中间件
+[Ratelimit 中间件文档](/pkg/middleware/ratelimit/README.md)
 
+### 13. Jaeger 链路追踪
+[Jaeger 链路追踪文档](/pkg/trace/jaeger/README.md)
+
+### 14. Redis 缓存
+[Redis 缓存文档](/pkg/cache/redis/README.md)
 

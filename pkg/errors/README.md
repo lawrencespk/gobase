@@ -274,7 +274,13 @@ if customErr, ok := err.(interface{ Code() string }); ok {
 code := errors.GetErrorCode(err)       // 获取错误码
 message := errors.GetErrorMessage(err) // 获取错误信息
 
-// 错误类型断言方式三：使用完整接口
+// 错误类型断言方式三：使用 AsError 转换（推荐）
+customErr := errors.AsError(err)
+code := customErr.Code()
+message := customErr.Message()
+details := customErr.Details()
+
+// 错误类型断言方式四：使用完整接口
 type Error interface {
     error
     Code() string
@@ -299,8 +305,12 @@ func TestError(t *testing.T) {
     // 方式一：直接断言接口方法
     assert.Equal(t, codes.SystemError, err.(interface{ Code() string }).Code())
     
-    // 方式二：使用工具函数（推荐）
+    // 方式二：使用工具函数
     assert.Equal(t, codes.SystemError, errors.GetErrorCode(err))
+    
+    // 方式三：使用 AsError（推荐）
+    customErr := errors.AsError(err)
+    assert.Equal(t, codes.SystemError, customErr.Code())
 }
 ```
 ## 7. 特定场景错误处理
