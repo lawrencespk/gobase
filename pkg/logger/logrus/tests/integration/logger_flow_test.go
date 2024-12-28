@@ -24,28 +24,26 @@ func TestCompleteLoggingFlow(t *testing.T) {
 
 	t.Logf("Using log path: %s", logPath)
 
-	// 配置完整的日志系统
-	opts := []logrus.Option{
-		logrus.WithOutputPaths([]string{logPath}),
-		logrus.WithOutput(&buf),
-		logrus.WithAsyncConfig(logrus.AsyncConfig{
+	// 创建选项
+	opts := []logger.Option{
+		// 设置输出路径
+		logger.WithOutputPaths([]string{logPath}),
+		// 添加 buffer 作为额外输出
+		logger.WithOutput(&buf),
+		// 设置压缩配置
+		logger.WithCompressConfig(logrus.CompressConfig{
+			Enable:       true,
+			Algorithm:    "gzip",
+			DeleteSource: true,
+			Interval:     time.Second,       // 缩短间隔以加快测试
+			LogPaths:     []string{logPath}, // 明确指定日志路径
+		}),
+		// 设置异步配置
+		logger.WithAsyncConfig(logrus.AsyncConfig{
 			Enable:        true,
 			BufferSize:    1024,
 			FlushInterval: time.Millisecond * 100,
 			FlushOnExit:   true,
-		}),
-		logrus.WithCompressConfig(logrus.CompressConfig{
-			Enable:       true,
-			Algorithm:    "gzip",
-			DeleteSource: true,
-			Interval:     time.Second * 2,
-		}),
-		logrus.WithCleanupConfig(logrus.CleanupConfig{
-			Enable:     true,
-			MaxBackups: 3,
-			MaxAge:     1,
-			Interval:   time.Second,
-			LogPaths:   []string{logPath},
 		}),
 	}
 
@@ -60,24 +58,17 @@ func TestCompleteLoggingFlow(t *testing.T) {
 	log.Info(ctx, "test info message", types.Field{Key: "key", Value: "value"})
 	log.Error(ctx, "test error message", types.Field{Key: "error", Value: errors.New("test error")})
 
-	// 等待异步操作完成并确保日志被刷新
-	time.Sleep(time.Second)
-	if closer, ok := log.(interface{ Sync() error }); ok {
-		if err := closer.Sync(); err != nil {
+	// 确保异步写入完成
+	if asyncLogger, ok := log.(interface{ Sync() error }); ok {
+		if err := asyncLogger.Sync(); err != nil {
 			t.Logf("Warning: Failed to sync logger: %v", err)
-		}
-	}
-
-	// 关闭日志实例以释放文件句柄
-	if closer, ok := log.(interface{ Close() error }); ok {
-		if err := closer.Close(); err != nil {
-			t.Logf("Warning: Failed to close logger: %v", err)
 		}
 	}
 
 	// 验证缓冲区中的日志内容
 	output := buf.String()
 	t.Logf("Buffer content length: %d", len(output))
+	t.Logf("Buffer content: %s", output)
 	if !bytes.Contains([]byte(output), []byte("test info message")) {
 		t.Error("Output should contain info message")
 		t.Logf("Actual output: %s", output)
@@ -91,15 +82,23 @@ func TestCompleteLoggingFlow(t *testing.T) {
 	t.Log("Waiting for compression...")
 	time.Sleep(time.Second * 3)
 
-	// 验证压缩功能
+	// 确保所有写入都已完成
+	if closer, ok := log.(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil {
+			t.Logf("Warning: Failed to close logger: %v", err)
+		}
+	}
+
+	// 验证压缩文件
 	compressedPath := logPath + ".gz"
 	if _, err := os.Stat(compressedPath); os.IsNotExist(err) {
 		t.Error("Compressed log file should exist")
-		// 列出目录内容
-		if files, err := os.ReadDir(filepath.Dir(logPath)); err == nil {
+		files, err := os.ReadDir(filepath.Dir(logPath))
+		if err == nil {
 			t.Log("Directory contents:")
 			for _, file := range files {
-				t.Logf("- %s", file.Name())
+				info, _ := file.Info()
+				t.Logf("- %s (size: %d bytes)", file.Name(), info.Size())
 			}
 		}
 		// 检查原始文件是否存在

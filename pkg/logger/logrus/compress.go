@@ -81,126 +81,131 @@ func (c *LogCompressor) Start() {
 
 // compressLogs 压缩日志文件
 func (c *LogCompressor) compressLogs() error {
-	logrus.WithField("paths", c.config.LogPaths).Info("Starting compression cycle") // 打印压缩路径
-
 	for _, path := range c.config.LogPaths {
 		// 跳过标准输出和标准错误
 		if path == "stdout" || path == "stderr" {
-			logrus.WithField("path", path).Debug("Skipping special path") // 打印跳过特殊路径
 			continue
 		}
 
-		compressedPath := path + ".gz" // 压缩路径
+		// 确保源文件已经完全写入
+		if err := c.ensureFileReady(path); err != nil {
+			logrus.WithError(err).WithField("path", path).Error("File not ready for compression")
+			continue
+		}
+
+		compressedPath := path + ".gz"
 
 		// 检查是否已经存在压缩文件
 		if _, err := os.Stat(compressedPath); err == nil {
-			logrus.WithField("path", compressedPath).Debug("Compressed file already exists") // 打印压缩文件已存在
-			// 如果源文件仍然存在，尝试再次删除
-			if _, err := os.Stat(path); err == nil && c.config.DeleteSource {
-				if err := os.Remove(path); err != nil {
-					logrus.WithError(err).WithField("path", path).Warn("Could not delete existing source file") // 打印删除源文件失败
-				} else {
-					logrus.WithField("path", path).Info("Successfully deleted existing source file") // 打印删除源文件成功
-				}
-			}
 			continue
 		}
 
-		// 读取源文件内容
-		content, err := func() ([]byte, error) {
-			srcFile, err := os.OpenFile(path, os.O_RDONLY, 0644) // 打开源文件
-			if err != nil {
-				return nil, errors.NewFileNotFoundError("failed to open source file", err) // 打开源文件失败
-			}
-			defer srcFile.Close() // 关闭源文件
-
-			data, err := io.ReadAll(srcFile) // 读取源文件内容
-			if err != nil {
-				return nil, errors.NewFileDownloadError("failed to read source file", err) // 读取源文件失败
-			}
-
-			logrus.WithFields(logrus.Fields{
-				"bytes": len(data),
-				"path":  path,
-			}).Debug("Read from source file") // 打印读取源文件内容
-			return data, nil
-		}()
-
+		// 以只读方式打开源文件
+		srcFile, err := os.OpenFile(path, os.O_RDONLY, 0644)
 		if err != nil {
 			if os.IsNotExist(err) {
-				logrus.WithField("path", path).Debug("File does not exist") // 打印文件不存在
 				continue
 			}
-			logrus.WithError(err).WithField("path", path).Error("Error reading source file") // 打印读取源文件失败
+			logrus.WithError(err).WithField("path", path).Error("Error opening source file")
 			continue
 		}
 
-		// 如果文件内容为空，跳过
-		if len(content) == 0 {
-			logrus.WithField("path", path).Debug("Skipping empty file") // 打印跳过空文件
+		// 确保文件句柄被关闭
+		if err := c.compressFile(srcFile, compressedPath); err != nil {
+			logrus.WithError(err).WithField("path", path).Error("Compression failed")
 			continue
 		}
 
-		// 创建压缩文件
-		if err := func() error {
-			gzFile, err := os.Create(compressedPath)
-			if err != nil {
-				return errors.NewFileUploadError("failed to create compressed file", err)
-			}
-			defer gzFile.Close() // 关闭压缩文件
-
-			gzWriter := gzip.NewWriter(gzFile) // 创建压缩写入器
-			defer gzWriter.Close()             // 关闭压缩写入器
-
-			written, err := gzWriter.Write(content) // 写入压缩数据
-			if err != nil {
-				return errors.NewFileUploadError("failed to write compressed data", err)
-			}
-			logrus.WithField("bytes", written).Debug("Wrote to compressed file") // 打印写入压缩数据
-
-			if err := gzWriter.Close(); err != nil {
-				return errors.NewFileUploadError("failed to close gzip writer", err)
-			}
-
-			return nil
-		}(); err != nil {
-			logrus.WithError(err).Error("Error compressing file") // 打印压缩文件失败
-			os.Remove(compressedPath)                             // 删除压缩文件
-			return err                                            // 返回错误
-		}
-
-		logrus.WithFields(logrus.Fields{
-			"source": path,
-			"target": compressedPath,
-		}).Info("Successfully compressed file") // 打印压缩文件成功
-
-		// 如果需要删除源文件，尝试删除
+		// 如果需要删除源文件
 		if c.config.DeleteSource {
-			// 多次尝试删除源文件
-			maxRetries := 3
-			for i := 0; i < maxRetries; i++ { // 多次尝试删除源文件
-				if err := os.Remove(path); err != nil { // 删除源文件
-					if i < maxRetries-1 { // 如果未达到最大重试次数
-						logrus.WithError(err).WithFields(logrus.Fields{ // 打印删除源文件失败
-							"path":  path,  // 路径
-							"retry": i + 1, // 重试次数
-						}).Warn("Could not delete source file") // 打印删除源文件失败
-						time.Sleep(time.Second) // 等待一秒后重试
-						continue
-					}
-					logrus.WithError(err).WithFields(logrus.Fields{ // 打印删除源文件失败
-						"path":    path,       // 路径
-						"retries": maxRetries, // 重试次数
-					}).Warn("Failed to delete source file") // 打印删除源文件失败
-				} else {
-					logrus.WithField("path", path).Info("Successfully deleted source file") // 打印删除源文件成功
-					break
-				}
+			if err := c.deleteSourceWithRetry(path); err != nil {
+				logrus.WithError(err).WithField("path", path).Error("Failed to delete source file")
 			}
 		}
 	}
+	return nil
+}
+
+// ensureFileReady 确保文件准备好被压缩
+func (c *LogCompressor) ensureFileReady(path string) error {
+	file, err := os.OpenFile(path, os.O_RDONLY, 0644)
+	if err != nil {
+		return errors.NewFileOperationError("failed to open file for compression", err)
+	}
+	defer file.Close()
+
+	// 尝试读取文件状态
+	_, err = file.Stat()
+	if err != nil {
+		return errors.NewFileOperationError("failed to get file stats", err)
+	}
+
+	// 简单检查文件是否可读
+	buf := make([]byte, 1)
+	_, err = file.Read(buf)
+	if err != nil && err != io.EOF {
+		return errors.NewFileOperationError("file is not readable", err)
+	}
 
 	return nil
+}
+
+// compressFile 压缩文件
+func (c *LogCompressor) compressFile(srcFile *os.File, compressedPath string) error {
+	defer srcFile.Close() // 确保源文件被关闭
+
+	// 创建压缩文件
+	gzFile, err := os.Create(compressedPath)
+	if err != nil {
+		return errors.NewFileOperationError("failed to create compressed file", err)
+	}
+	defer gzFile.Close()
+
+	// 创建 gzip writer
+	gzWriter := gzip.NewWriter(gzFile)
+	defer gzWriter.Close()
+
+	// 直接从源文件复制到压缩文件
+	if _, err := io.Copy(gzWriter, srcFile); err != nil {
+		os.Remove(compressedPath)
+		return errors.NewFileOperationError("failed to compress file", err)
+	}
+
+	// 确保所有数据都被写入
+	if err := gzWriter.Close(); err != nil {
+		os.Remove(compressedPath)
+		return errors.NewFileOperationError("failed to finalize compression", err)
+	}
+
+	return nil
+}
+
+// deleteSourceWithRetry 删除源文件并重试
+func (c *LogCompressor) deleteSourceWithRetry(path string) error {
+	// 多次尝试删除源文件
+	maxRetries := 3
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		if err := os.Remove(path); err != nil {
+			lastErr = err
+			if i < maxRetries-1 {
+				logrus.WithError(err).WithFields(logrus.Fields{
+					"path":  path,
+					"retry": i + 1,
+				}).Warn("Could not delete source file")
+				time.Sleep(time.Second)
+				continue
+			}
+			logrus.WithError(err).WithFields(logrus.Fields{
+				"path":    path,
+				"retries": maxRetries,
+			}).Warn("Failed to delete source file")
+		} else {
+			logrus.WithField("path", path).Info("Successfully deleted source file")
+			return nil
+		}
+	}
+	return errors.NewFileOperationError("failed to delete source file after retries", lastErr)
 }
 
 // Stop 停止压缩器

@@ -10,9 +10,9 @@ import (
 
 // RetryConfig 重试配置
 type RetryConfig struct {
-	MaxRetries  int           // 最大重试次数（不包括初始尝试）
-	InitialWait time.Duration // 首次重试前的等待时间
-	MaxWait     time.Duration // 最大重试等待时间
+	MaxRetries  int           `yaml:"max_retries"`  // 最大重试次数（不包括初始尝试）
+	InitialWait time.Duration `yaml:"initial_wait"` // 首次重试前的等待时间
+	MaxWait     time.Duration `yaml:"max_wait"`     // 最大重试等待时间
 }
 
 // RetryableFunc 可重试的函数类型

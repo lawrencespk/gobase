@@ -18,9 +18,9 @@ func TestLoggerRecovery(t *testing.T) {
 	t.Logf("Using temporary directory: %s", tmpDir)
 	t.Logf("Log file path: %s", logPath)
 
-	opts := []logrus.Option{
-		logrus.WithOutputPaths([]string{logPath}),
-		logrus.WithRecoveryConfig(logrus.RecoveryConfig{
+	opts := []logger.Option{
+		logger.WithOutputPaths([]string{logPath}),
+		logger.WithRecoveryConfig(&logrus.RecoveryConfig{
 			Enable:        true,
 			MaxRetries:    3,
 			RetryInterval: time.Millisecond * 100,
@@ -60,7 +60,6 @@ func TestLoggerRecovery(t *testing.T) {
 
 	t.Log("Checking for log file...")
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
-		// 列出目录内容以帮助调试
 		files, _ := os.ReadDir(tmpDir)
 		t.Log("Directory contents:")
 		for _, file := range files {

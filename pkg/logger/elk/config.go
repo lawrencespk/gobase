@@ -40,8 +40,8 @@ func DefaultElkConfig() *ElkConfig {
 	}
 }
 
-// LoggingConfig ELK日志配置
-type LoggingConfig struct {
+// Config ELK配置
+type Config struct {
 	// Elasticsearch配置
 	Elasticsearch ElkConfig `yaml:"elasticsearch"`
 	// Hook配置
@@ -62,7 +62,7 @@ type BatchConfig struct {
 }
 
 // ConfigureLogrus 配置Logrus使用ELK Hook
-func ConfigureLogrus(logger *logrus.Logger, cfg LoggingConfig) error {
+func ConfigureLogrus(logger *logrus.Logger, cfg Config) error {
 	if !cfg.Hook.Enabled {
 		return nil
 	}
@@ -83,11 +83,13 @@ func ConfigureLogrus(logger *logrus.Logger, cfg LoggingConfig) error {
 		Levels: levels,
 		Index:  cfg.Hook.Index,
 		BatchConfig: &BulkProcessorConfig{
-			BatchSize:  cfg.Hook.Batch.Size,
-			FlushBytes: int64(cfg.Hook.Batch.FlushBytes),
-			Interval:   cfg.Hook.Batch.Interval,
-			RetryCount: cfg.Hook.Retry.MaxRetries,
-			RetryWait:  cfg.Hook.Retry.InitialWait,
+			BatchSize:    cfg.Hook.Batch.Size,
+			FlushBytes:   int64(cfg.Hook.Batch.FlushBytes),
+			Interval:     cfg.Hook.Batch.Interval,
+			RetryCount:   cfg.Hook.Retry.MaxRetries,
+			RetryWait:    cfg.Hook.Retry.InitialWait,
+			MaxWait:      cfg.Hook.Retry.MaxWait,
+			CloseTimeout: 30 * time.Second,
 		},
 		ErrorLogger: logger,
 	})

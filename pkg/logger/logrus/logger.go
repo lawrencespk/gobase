@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,10 +22,8 @@ type logrusLogger struct {
 	opts        *Options        // 配置
 	ctx         context.Context // 上下文
 	compressor  *LogCompressor  // 压缩器
-	cleaner     *LogCleaner     // 清理器
 	asyncWriter *AsyncWriter    // 异步写入器
 	fileManager *FileManager    // 文件管理器
-	writeQueue  *WriteQueue     // 写入队列
 	writers     []io.Writer     // 保存writers以便后续清理
 	closed      bool            // 标记是否已关闭
 	mu          sync.Mutex      // 保护 closed 字段
@@ -35,83 +32,100 @@ type logrusLogger struct {
 // NewLogger 创建新的logrus日志实例
 func NewLogger(fm *FileManager, config QueueConfig, options *Options) (*logrusLogger, error) {
 	l := &logrusLogger{
-		logger:      logrus.New(),         // 创建新的logrus日志实例
-		opts:        options,              // 配置
-		ctx:         context.Background(), // 上下文
-		fileManager: fm,                   // 文件管理器
+		logger:      logrus.New(),
+		opts:        options,
+		ctx:         context.Background(),
+		fileManager: fm,
 	}
 
-	// 设置多输出
-	var writers []io.Writer
+	// 设置格式化器
+	formatter := newFormatter(options)
+	l.logger.SetFormatter(formatter)
 
-	// 处理自定义writers
-	if len(options.writers) > 0 {
-		writers = append(writers, options.writers...) // 添加自定义写入器
-	}
+	// 设置一个空的输出
+	l.logger.SetOutput(io.Discard)
 
-	// 处理输出路径
-	if len(options.OutputPaths) > 0 {
-		for _, path := range options.OutputPaths { // 遍历输出路径
-			var w io.Writer // 写入器
-			switch path {
-			case "stdout": // 标准输出
-				w = os.Stdout
-			case "stderr": // 标准错误
-				w = os.Stderr
-			default: // 默认输出到文件
-				// 确保目录存在
-				if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-					return nil, errors.NewFileOperationError("failed to create log directory", err) // 创建日志目录失败
+	// 处理所有的 writers
+	var logPaths []string
+
+	// 处理自定义 writers
+	for _, w := range options.writers {
+		if w != nil {
+			// 如果启用了异步写入且不是标准输出/错误
+			var writer io.Writer = w
+			if options.AsyncConfig.Enable && w != os.Stdout && w != os.Stderr {
+				if ww, ok := w.(Writer); ok {
+					aw := NewAsyncWriter(ww, options.AsyncConfig)
+					if aw != nil {
+						writer = aw
+						l.asyncWriter = aw
+					}
 				}
-
-				file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-				if err != nil {
-					return nil, errors.NewFileOperationError("failed to open log file", err) // 打开日志文件失败
-				}
-				w = file
 			}
-			writers = append(writers, w) // 添加写入器
+
+			// 添加到 writers 列表
+			l.writers = append(l.writers, writer)
+
+			// 创建并添加 hook
+			hook := &writerHook{
+				writer:    writer,
+				formatter: formatter,
+			}
+			l.logger.AddHook(hook)
 		}
 	}
 
-	// 如果没有配置任何输出，默认输出到标准输出
-	if len(writers) == 0 {
-		writers = append(writers, os.Stdout) // 默认输出到标准输出
+	// 处理输出路径
+	for _, path := range options.OutputPaths {
+		var w io.Writer
+		switch path {
+		case "stdout":
+			w = os.Stdout
+		case "stderr":
+			w = os.Stderr
+		default:
+			// 确保目录存在
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				return nil, errors.NewFileOperationError("failed to create log directory", err)
+			}
+
+			file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+			if err != nil {
+				return nil, errors.NewFileOperationError("failed to open log file", err)
+			}
+			w = file
+			logPaths = append(logPaths, path)
+		}
+
+		// 如果启用了异步写入且不是标准输出/错误
+		if options.AsyncConfig.Enable && w != os.Stdout && w != os.Stderr {
+			if ww, ok := w.(Writer); ok {
+				aw := NewAsyncWriter(ww, options.AsyncConfig)
+				if aw != nil {
+					w = aw
+					l.asyncWriter = aw
+				}
+			}
+		}
+
+		// 添加到 writers 列表
+		l.writers = append(l.writers, w)
+
+		// 创建并添加 hook
+		hook := &writerHook{
+			writer:    w,
+			formatter: formatter,
+		}
+		l.logger.AddHook(hook)
 	}
 
-	// 设置输出
-	l.logger.SetOutput(io.MultiWriter(writers...)) // 设置输出
-	l.writers = writers                            // 设置写入器
-
-	// 初始化写入队列
-	queue, err := NewWriteQueue(fm, config) // 创建写入队列
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create write queue")
-	}
-	l.writeQueue = queue // 设置写入队列
-
-	// 配置 logrus
-	l.logger.SetLevel(convertLevel(options.Level)) // 设置日志级别
-	l.logger.SetFormatter(newFormatter(options))   // 设置日志格式
-	l.logger.SetReportCaller(true)                 // 设置调用者信息
-
-	// 初始化压缩器
-	if options.CompressConfig.Enable {
-		// 确保压缩配置包含日志路径
-		compressConfig := options.CompressConfig      // 压缩配置
-		compressConfig.LogPaths = options.OutputPaths // 日志路径
-
-		compressor := NewLogCompressor(compressConfig)                    // 创建压缩器
-		l.compressor = compressor                                         // 设置压缩器
-		compressor.Start()                                                // 启动压缩器
-		log.Printf("Compressor started with config: %+v", compressConfig) // 打印压缩器启动成功
-	}
-
-	// 初始化清理器
-	if options.CleanupConfig.Enable { // 如果启用清理
-		cleaner := NewLogCleaner(options.CleanupConfig) // 创建清理器
-		l.cleaner = cleaner                             // 设置清理器
-		cleaner.Start()                                 // 启动清理器
+	// 如果启用了压缩
+	if options.CompressConfig.Enable && len(logPaths) > 0 {
+		options.CompressConfig.LogPaths = logPaths
+		l.compressor = NewLogCompressor(options.CompressConfig)
+		if l.compressor != nil {
+			l.compressor.Start()
+		}
 	}
 
 	return l, nil
@@ -147,10 +161,14 @@ func (l *logrusLogger) WithCaller(skip int) types.Logger {
 // clone 克隆logger实例
 func (l *logrusLogger) clone() *logrusLogger {
 	return &logrusLogger{
-		logger: l.logger,                             // logrus日志实例
-		fields: append([]types.Field{}, l.fields...), // 字段
-		opts:   l.opts,                               // 配置
-		ctx:    l.ctx,                                // 上下文
+		logger:      l.logger,
+		fields:      append([]types.Field{}, l.fields...),
+		opts:        l.opts,
+		ctx:         l.ctx,
+		compressor:  l.compressor,
+		asyncWriter: l.asyncWriter,
+		fileManager: l.fileManager,
+		writers:     l.writers,
 	}
 }
 
@@ -236,9 +254,14 @@ func (l *logrusLogger) WithContext(ctx context.Context) types.Logger {
 // WithFields 添加字段
 func (l *logrusLogger) WithFields(fields ...types.Field) types.Logger {
 	newLogger := &logrusLogger{
-		logger: l.logger,                    // logrus日志实例
-		fields: append(l.fields, fields...), // 字段
-		opts:   l.opts,                      // 配置
+		logger:      l.logger,
+		fields:      append(l.fields, fields...),
+		opts:        l.opts,
+		ctx:         l.ctx,
+		compressor:  l.compressor,
+		asyncWriter: l.asyncWriter,
+		fileManager: l.fileManager,
+		writers:     l.writers,
 	}
 	return newLogger
 }
@@ -253,109 +276,109 @@ func (l *logrusLogger) SetLevel(level types.Level) {
 	l.logger.SetLevel(logrus.Level(level)) // 设置日志级别
 }
 
-// GetLevel 取日志级别
+// GetLevel 获取日志级别
 func (l *logrusLogger) GetLevel() types.Level {
 	return types.Level(l.logger.GetLevel()) // 取日志级别
 }
 
 // Sync 同步日志
 func (l *logrusLogger) Sync() error {
-	l.mu.Lock()   // 锁定
-	if l.closed { // 如果已关闭
-		l.mu.Unlock() // 解锁
-		return nil
-	}
-	l.mu.Unlock() // 解锁
-
-	var errs []error
-
-	// 停止压缩器
-	if l.compressor != nil {
-		l.compressor.Stop() // 停止压缩器
-	}
-
-	// 停止清理器
-	if l.cleaner != nil {
-		l.cleaner.Stop() // 停止清理器
-	}
-
-	// 停止异步写入器
+	// 如果启用了异步写入，等待写入完成
 	if l.asyncWriter != nil {
-		if err := l.asyncWriter.Stop(); err != nil { // 停止异步写入器
-			errs = append(errs, errors.Wrap(err, "failed to stop async writer")) // 添加错误
+		if err := l.asyncWriter.Flush(); err != nil {
+			return errors.NewLogFlushError("failed to flush async writer", err)
 		}
 	}
 
-	// 关闭文件管理器
-	if l.fileManager != nil {
-		if err := l.fileManager.Close(); err != nil { // 关闭文件管理器
-			errs = append(errs, errors.Wrap(err, "failed to close file manager")) // 添加错误
+	// 同步所有 writers
+	for _, w := range l.writers {
+		if syncer, ok := w.(interface{ Sync() error }); ok {
+			if err := syncer.Sync(); err != nil {
+				return errors.NewLogFlushError("failed to sync writer", err)
+			}
 		}
 	}
 
-	// 关闭写入队列
-	if l.writeQueue != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := l.writeQueue.Close(ctx); err != nil { // 关闭写入队列
-			errs = append(errs, errors.Wrap(err, "failed to close write queue")) // 添加错误
+	// 如果启用了压缩，等待压缩完成
+	if l.compressor != nil {
+		// 给文件写入一些时间
+		time.Sleep(time.Second * 2)
+
+		// 确保所有文件都已经同步到磁盘
+		for _, w := range l.writers {
+			if file, ok := w.(*os.File); ok {
+				if err := file.Sync(); err != nil {
+					return errors.NewLogFlushError("failed to sync file", err)
+				}
+			}
 		}
+
+		// 停止压缩器
+		l.compressor.Stop()
+
+		// 等待压缩完成
+		time.Sleep(time.Second)
 	}
 
-	if len(errs) > 0 {
-		return errors.NewSystemError("sync errors", fmt.Errorf("%v", errs)) // 返回同步错误
-	}
 	return nil
 }
 
 // log 内部日志方法
 func (l *logrusLogger) log(ctx context.Context, level logrus.Level, msg string, fields ...types.Field) {
-	if !l.logger.IsLevelEnabled(level) { // 如果未启用日志级别
+	if !l.logger.IsLevelEnabled(level) {
 		return
 	}
 
-	// 使用上下文创建日志条目
-	entry := l.logger.WithContext(ctx)
+	// 创建新的日志条目
+	entry := &logrus.Entry{
+		Logger:  l.logger,
+		Time:    time.Now(),
+		Level:   level,
+		Message: msg,
+	}
 
 	// 合并字段
 	allFields := make(logrus.Fields)
 
 	// 添加基础字段
-	allFields["timestamp"] = time.Now().Format(time.RFC3339) // 添加时间字段
-	allFields["level"] = level.String()                      // 添加日志级别字段
+	allFields["timestamp"] = entry.Time.Format(time.RFC3339)
+	allFields["level"] = level.String()
 
 	// 添加上下文字段
 	if ctx != nil {
-		contextFields := extractContextFields(ctx) // 提取上下文字段
+		contextFields := extractContextFields(ctx)
 		for _, field := range contextFields {
-			allFields[field.Key] = field.Value // 添加上下文字段
+			allFields[field.Key] = field.Value
 		}
 	}
 
 	// 添加预设字段
 	for _, field := range l.fields {
-		allFields[field.Key] = field.Value // 添加预设字段
+		allFields[field.Key] = field.Value
 	}
 
 	// 添加当前字段
 	for _, field := range fields {
-		allFields[field.Key] = field.Value // 添加当前字段
+		allFields[field.Key] = field.Value
 	}
 
 	// 添加调用者信息
 	if l.opts.ReportCaller {
-		if pc, file, line, ok := runtime.Caller(2); ok { // 获取调用者信息
-			f := runtime.FuncForPC(pc) // 获取函数信息
+		if pc, file, line, ok := runtime.Caller(2); ok {
+			f := runtime.FuncForPC(pc)
 			allFields["caller"] = map[string]interface{}{
-				"function": f.Name(), // 函数名
-				"file":     file,     // 文件名
-				"line":     line,     // 行号
+				"function": f.Name(),
+				"file":     file,
+				"line":     line,
 			}
 		}
 	}
 
-	// 使用上下文和所有字段创建日志条目
-	entry.WithFields(allFields).Log(level, msg)
+	// 设置所有字段
+	entry.Data = allFields
+
+	// 直接调用 Log 方法，这会触发所有的 hooks
+	entry.Log(level, msg)
 }
 
 // extractContextFields 从上下文中提取字段
@@ -385,55 +408,134 @@ func extractContextFields(ctx context.Context) []types.Field {
 	return fields
 }
 
-// convertLevel 将 types.Level 转换为 logrus.Level
-func convertLevel(level types.Level) logrus.Level {
-	switch level {
-	case types.DebugLevel: // 调试级别
-		return logrus.DebugLevel
-	case types.InfoLevel: // 信息级别
-		return logrus.InfoLevel
-	case types.WarnLevel: // 警告级别
-		return logrus.WarnLevel
-	case types.ErrorLevel: // 错误级别
-		return logrus.ErrorLevel
-	case types.FatalLevel: // 严重级别
-		return logrus.FatalLevel
-	default: // 默认信息级别
-		return logrus.InfoLevel
-	}
-}
-
 // Close 实现 io.Closer 接口
 func (l *logrusLogger) Close() error {
-	l.mu.Lock()   // 锁定
-	if l.closed { // 如果已关闭
-		l.mu.Unlock() // 解锁
+	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
 		return nil
 	}
-	l.closed = true // 设置已关闭
-	l.mu.Unlock()   // 解锁
+	l.closed = true
+	l.mu.Unlock()
 
 	var errs []error
 
-	// 先同步日志
-	if err := l.Sync(); err != nil { // 同步日志
-		errs = append(errs, errors.Wrap(err, "sync error")) // 添加错误
+	// 1. 先停止异步写入器（它会关闭底层的文件句柄）
+	if l.asyncWriter != nil {
+		if err := l.asyncWriter.Stop(); err != nil {
+			errs = append(errs, errors.Wrap(err, "async writer stop error"))
+		}
 	}
 
-	// 关闭所有writers
+	// 2. 然后停止压缩器
+	if l.compressor != nil {
+		l.compressor.Stop()
+		// 给压缩器一些时间完成最后的工作
+		time.Sleep(time.Second)
+	}
+
+	// 3. 关闭其他非异步的 writers
 	for _, w := range l.writers {
-		if closer, ok := w.(io.Closer); ok {
-			if err := closer.Close(); err != nil { // 关闭writer
-				errs = append(errs, errors.Wrap(err, "writer close error")) // 添加错误
+		// 跳过已经被异步写入器包装的 writer
+		if _, ok := w.(*AsyncWriter); ok {
+			continue
+		}
+
+		// 如果是文件，先同步再关闭
+		if file, ok := w.(*os.File); ok {
+			if err := file.Sync(); err != nil {
+				errs = append(errs, errors.Wrap(err, "file sync error"))
+			}
+			if err := file.Close(); err != nil {
+				errs = append(errs, errors.Wrap(err, "file close error"))
+			}
+		} else if closer, ok := w.(io.Closer); ok {
+			if err := closer.Close(); err != nil {
+				errs = append(errs, errors.Wrap(err, "writer close error"))
 			}
 		}
 	}
 
-	// 清空writers列表
+	// 清空 writers 列表
 	l.writers = nil
 
 	if len(errs) > 0 {
-		return errors.NewSystemError("close errors", fmt.Errorf("%v", errs)) // 返回关闭错误
+		return errors.NewSystemError("close errors", fmt.Errorf("%v", errs))
 	}
+	return nil
+}
+
+// GetLogrusLogger 返回原始的 logrus logger
+func (l *logrusLogger) GetLogrusLogger() *logrus.Logger {
+	return l.logger
+}
+
+// AddWriter 添加一个输出 writer
+func (l *logrusLogger) AddWriter(w io.Writer) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.closed {
+		return errors.NewSystemError("logger is closed", nil)
+	}
+
+	// 添加到 writers 列表
+	l.writers = append(l.writers, w)
+
+	// 添加到 logrus logger，使用相同的 formatter
+	l.logger.AddHook(&writerHook{
+		writer:    w,
+		formatter: l.logger.Formatter,
+	})
+
+	return nil
+}
+
+// writerHook 实现 logrus.Hook 接口
+type writerHook struct {
+	writer    io.Writer
+	formatter logrus.Formatter
+	mu        sync.Mutex
+}
+
+func (h *writerHook) Levels() []logrus.Level {
+	return logrus.AllLevels
+}
+
+// 添加接口定义
+type flusher interface {
+	Flush() error
+}
+
+type syncer interface {
+	Sync() error
+}
+
+func (h *writerHook) Fire(entry *logrus.Entry) error {
+	line, err := h.formatter.Format(entry)
+	if err != nil {
+		return errors.NewLogFormatError("failed to format log entry", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if _, err := h.writer.Write(line); err != nil {
+		return errors.NewLogWriteError("failed to write log entry", err)
+	}
+
+	// 如果 writer 支持 flush 和 sync
+	if f, ok := h.writer.(flusher); ok {
+		if err := f.Flush(); err != nil {
+			return errors.NewLogFlushError("failed to flush log buffer", err)
+		}
+	}
+
+	if s, ok := h.writer.(syncer); ok {
+		if err := s.Sync(); err != nil {
+			return errors.NewLogFlushError("failed to sync log file", err)
+		}
+	}
+
 	return nil
 }

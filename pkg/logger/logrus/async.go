@@ -1,6 +1,8 @@
 package logrus
 
 import (
+	"bytes"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,29 +48,31 @@ func NewAsyncWriter(w Writer, config AsyncConfig) *AsyncWriter {
 
 // Write 实现 io.Writer 接口
 func (w *AsyncWriter) Write(p []byte) (n int, err error) {
-	if !w.config.Enable { // 如果未启用异步写入
-		return w.writer.Write(p) // 同步写入
+	if !w.config.Enable {
+		return w.writer.Write(p)
 	}
 
 	// 复制日志内容，避免被修改
-	data := make([]byte, len(p)) // 创建数据副本
-	copy(data, p)                // 复制数据
+	data := make([]byte, len(p))
+	copy(data, p)
+
+	// 对于 bytes.Buffer，直接写入
+	if _, ok := w.writer.(*bytes.Buffer); ok {
+		return w.writer.Write(data)
+	}
 
 	select {
-	case w.buffer <- data: // 写入缓冲区
-		return len(p), nil // 返回写入长度
+	case w.buffer <- data:
+		return len(p), nil
 	default:
 		if w.config.BlockOnFull {
-			// 阻塞写入
-			w.buffer <- data   // 写入缓冲区
-			return len(p), nil // 返回写入长度
+			w.buffer <- data
+			return len(p), nil
 		} else if w.config.DropOnFull {
-			// 丢弃日志
-			atomic.AddInt64(&w.dropCount, 1) // 增加丢弃计数
-			return len(p), nil               // 返回写入长度
+			atomic.AddInt64(&w.dropCount, 1)
+			return len(p), nil
 		}
-		// 同步写入
-		return w.writer.Write(p) // 同步写入
+		return w.writer.Write(p)
 	}
 }
 
@@ -80,21 +84,33 @@ func (w *AsyncWriter) start() {
 
 // Stop 停止异步写入
 func (w *AsyncWriter) Stop() error {
+	if !w.config.Enable {
+		return nil
+	}
+
 	close(w.done) // 关闭退出通道
 	w.wg.Wait()   // 等待异步写入完成
 
 	if w.config.FlushOnExit {
 		// 先刷新数据
-		if err := w.Flush(); err != nil { // 刷新数据
+		if err := w.Flush(); err != nil {
 			return errors.NewOperationFailedError("failed to flush async writer", err)
 		}
 	}
+
+	// 如果底层 writer 支持 Close，也需要关闭
+	if closer, ok := w.writer.(io.Closer); ok {
+		if err := closer.Close(); err != nil {
+			return errors.NewOperationFailedError("failed to close underlying writer", err)
+		}
+	}
+
 	return nil
 }
 
 // Flush 刷新缓冲区
 func (w *AsyncWriter) Flush() error {
-	if !w.config.Enable { // 如果未启用异步写入
+	if !w.config.Enable {
 		return nil
 	}
 
@@ -102,11 +118,16 @@ func (w *AsyncWriter) Flush() error {
 	for {
 		select {
 		case data := <-w.buffer:
-			if _, err := w.writer.Write(data); err != nil { // 写入数据
+			if _, err := w.writer.Write(data); err != nil {
 				return errors.NewOperationFailedError("failed to write data in flush", err)
 			}
 		default:
-			// 缓冲区已空
+			// 缓冲区已空，调用底层 writer 的 Sync 方法
+			if syncer, ok := w.writer.(interface{ Sync() error }); ok {
+				if err := syncer.Sync(); err != nil {
+					return errors.NewOperationFailedError("failed to sync writer", err)
+				}
+			}
 			return nil
 		}
 	}

@@ -2,392 +2,382 @@
 
 ## 目录
 - [简介](#简介)
+- [系统架构](#系统架构)
 - [功能特性](#功能特性)
 - [快速开始](#快速开始)
-- [基础使用](#基础使用)
+- [详细配置](#详细配置)
 - [高级特性](#高级特性)
-- [配置说明](#配置说明)
+- [性能优化](#性能优化)
+- [监控指标](#监控指标)
 - [最佳实践](#最佳实践)
 - [常见问题](#常见问题)
+- [开发计划](#开发计划)
 
 ## 简介
-本日志系统基于 logrus 构建，并集成了 ELK Stack，提供了完整的日志收集、存储、查询解决方案。
+
+本日志系统是一个高性能、可扩展的分布式日志解决方案。基于 logrus 构建,集成了 ELK Stack,提供完整的日志收集、存储、查询能力。
+
+主要特点:
+- 高性能异步处理
+- 智能批量处理
+- 自动重试机制
+- 内存优化管理
+- 完整监控指标
+- 灵活的扩展性
+
+## 系统架构
+
+```
+┌─────────────┐    ┌──────────┐    ┌─────────┐    ┌───────────────┐
+│ Application │───>│ LogQueue │───>│ Writers │───>│ Storage Layer │
+└─────────────┘    └──────────┘    └─────────┘    └───────────────┘
+       │                                                   │
+       │            ┌──────────┐    ┌─────────┐          │
+       └────────────│  Hooks   │───>│  ELK    │──────────┘
+                    └──────────┘    └─────────┘
+```
 
 ## 功能特性
-### 基础功能
-- 多级别日志记录(Debug, Info, Warn, Error, Fatal)
+
+### 核心功能
+- 多级别日志(Debug/Info/Warn/Error/Fatal)
 - 结构化日志输出
 - 自定义字段支持
 - 调用者信息记录
+- 错误堆栈跟踪
 - 异步日志写入
 - 日志文件轮转
 - 日志压缩存储
-- 自动清理过期日志
+- 过期日志清理
 
-### 高级特性
-- ELK 集成
-- 批量日志处理
-- 错误重试机制
-- 优雅关闭
-- 性能优化
-- 自定义格式化
+### 文件管理
+- 自动创建日志目录
+- 文件权限管理
+- 文件句柄复用
+- 自动轮转清理
+- 压缩归档支持
+
+### 内存管理
+- 对象池复用
+- 内存使用限制
+- 缓冲区管理
+- GC优化策略
+
+### ELK集成
+- 自动批量处理
+- 索引管理
+- 模板管理
+- 文档管理
+- 查询支持
+- 错误重试
+- 性能监控
 
 ## 快速开始
+
+### 基础使用
 ```go
-package main
-import (
-"gobase/pkg/logger/logrus"
-"gobase/pkg/logger/elk"
-)
-func main() {
-// 1. 创建基础配置
+// 1. 创建日志配置
 opts := logrus.DefaultOptions()
 opts.OutputPaths = []string{"stdout", "./logs/app.log"}
-// 2. 创建文件管理器
-fm, err := logrus.NewFileManager(logrus.FileOptions{
-BufferSize: 32 1024,
-MaxOpenFiles: 100,
-DefaultPath: "./logs/app.log",
-})
+
+// 2. 初始化日志器
+logger, err := logrus.NewLogger(opts)
 if err != nil {
-panic(err)
-}
-// 3. 初始化日志器
-logger, err := logrus.NewLogger(fm, logrus.QueueConfig{
-MaxSize: 1000,
-BatchSize: 100,
-Workers: 1,
-}, opts)
-if err != nil {
-panic(err)
+    panic(err)
 }
 defer logger.Close()
-// 4. 记录日志
-logger.Info("应用启动成功")
-}
-```
-## 基础使用
 
-### 日志级别
-```go
-logger.Debug("调试信息")
-logger.Info("普通信息")
-logger.Warn("警告信息")
-logger.Error("错误信息")
-logger.Fatal("致命错误") // 会导致程序退出
-```
-### 添加字段
-```go
-logger.WithFields([]types.Field{
-{Key: "user_id", Value: "12345"},
-{Key: "action", Value: "login"},
+// 3. 记录日志
+logger.Info("应用启动成功")
+logger.WithFields(logrus.Fields{
+    "user_id": "12345",
+    "action": "login",
 }).Info("用户登录")
 ```
-### 异步写入
-```go
-opts := &logrus.Options{
-AsyncConfig: logrus.AsyncConfig{
-Enable: true,
-BufferSize: 8192,
-FlushInterval: time.Second,
-},
-}
-```
-## 高级特性
 
-### ELK 集成
+### ELK集成
 ```go
-elkConfig := elk.DefaultElkConfig()
-elkConfig.Addresses = []string{"http://elasticsearch:9200"}
-hookOpts := elk.ElkHookOptions{
-Config: elkConfig,
-Index: "app-logs",
-BatchConfig: &elk.BulkProcessorConfig{
-BatchSize: 100,
-FlushInterval: time.Second,
-},
-}
-hook, err := elk.NewElkHook(hookOpts)
-if err != nil {
-panic(err)
-}
-logger.AddHook(hook)
-```
-### ELK 集成详细配置
-```go
-// 1. 创建 ELK 配置
-elkConfig := elk.DefaultElkConfig()
-elkConfig.Addresses = []string{"http://elasticsearch:9200"}
-elkConfig.Username = "elastic"
-elkConfig.Password = "password"
-elkConfig.Index = "my-app-logs"
-elkConfig.Timeout = 30 * time.Second
-
-// 2. 配置 Hook 选项
-hookOpts := elk.ElkHookOptions{
-    Config: elkConfig,
-    Levels: []logrus.Level{
-        logrus.InfoLevel,
-        logrus.WarnLevel,
-        logrus.ErrorLevel,
-    },
-    Index: "my-app-logs",
-    BatchConfig: &elk.BulkProcessorConfig{
-        BatchSize: 100,
-        FlushBytes: 5 * 1024 * 1024, // 5MB
-        Interval: time.Second,
-        RetryCount: 3,
-        RetryWait: time.Second,
-        CloseTimeout: 10 * time.Second,
-    },
-    MaxDocSize: 5 * 1024 * 1024, // 5MB
-    IndexPrefix: "logs",
-    IndexSuffix: time.Now().Format("2006.01.02"),
+// 1. ELK配置
+elkConfig := elk.Config{
+    Addresses: []string{"http://elasticsearch:9200"},
+    Username: "elastic",
+    Password: "password",
+    Index: "app-logs",
 }
 
-// 3. 创建并添加 Hook
-hook, err := elk.NewElkHook(hookOpts)
+// 2. 创建Hook
+hook, err := elk.NewHook(elkConfig)
 if err != nil {
     panic(err)
 }
+
+// 3. 添加Hook
 logger.AddHook(hook)
 ```
 
-### 自定义格式化
+## 详细配置
+
+### 日志器配置
 ```go
-// 1. 创建自定义格式化器
-formatter := &logrus.Formatter{
-    TimestampFormat: time.RFC3339,
-    PrettyPrint: true,
-}
-
-// 2. 设置格式化器
-logger.SetFormatter(formatter)
-```
-
-### 错误处理与重试机制
-```go
-// 1. 配置重试
-retryConfig := elk.RetryConfig{
-    MaxRetries: 3,
-    InitialWait: time.Second,
-    MaxWait: 5 * time.Second,
-}
-
-// 2. 使用重试机制
-err := elk.WithRetry(ctx, retryConfig, func() error {
-    return logger.Info("重要消息")
-}, logger)
-```
-
-### 批量处理配置
-```go
-// 1. 创建批处理配置
-bulkConfig := elk.BulkProcessorConfig{
-    BatchSize: 1000,
-    FlushBytes: 5 * 1024 * 1024,
-    Interval: time.Second,
-    DefaultIndex: "my-app-logs",
-    RetryCount: 3,
-    RetryWait: time.Second,
-    CloseTimeout: 10 * time.Second,
-}
-
-// 2. 创建批处理器
-processor, err := elk.NewBulkProcessor(client, &bulkConfig)
-if err != nil {
-    panic(err)
-}
-defer processor.Close()
-```
-
-### 索引管理
-```go
-// 1. 创建索引映射
-mapping := elk.DefaultIndexMapping()
-mapping.Settings["number_of_shards"] = 3
-mapping.Settings["number_of_replicas"] = 2
-
-// 2. 创建索引
-err := client.CreateIndex(ctx, "my-app-logs", mapping)
-
-// 3. 检查索引是否存在
-exists, err := client.IndexExists(ctx, "my-app-logs")
-
-// 4. 删除索引
-err := client.DeleteIndex(ctx, "my-app-logs")
-```
-
-### 缓冲池管理
-```go
-// 1. 创建缓冲池
-bufferPool := logrus.NewBufferPool()
-
-// 2. 创建写入池
-writePool := logrus.NewWritePool(32 * 1024) // 32KB buffer size
-```
-
-### 压缩配置
-```go
-compressConfig := logrus.CompressConfig{
-    Enable: true,
-    Algorithm: "gzip",
-    Level: gzip.BestCompression,
-    DeleteSource: true,
-    Interval: time.Hour,
-    LogPaths: []string{"./logs"},
+type Options struct {
+    // 基础配置
+    Level            string   // 日志级别
+    Format           string   // 日志格式(text/json)
+    OutputPaths      []string // 输出路径
+    ErrorOutputPaths []string // 错误输出路径
+    
+    // 文件配置
+    MaxSize        int  // 单个文件最大尺寸(MB)
+    MaxAge         int  // 文件最大保留天数
+    MaxBackups     int  // 最大备份数量
+    Compress       bool // 是否压缩
+    
+    // 异步配置
+    Async          bool          // 是否异步
+    QueueSize      int          // 队列大小
+    FlushInterval  time.Duration // 刷新间隔
+    
+    // 格式化配置
+    TimeFormat     string // 时间格式
+    CallerSkip     int    // 调用者跳过层级
+    ReportCaller   bool   // 是否记录调用者
 }
 ```
 
-### 清理配置
-```go
-cleanupConfig := logrus.CleanupConfig{
-    Enable: true,
-    MaxBackups: 7,
-    MaxAge: 30,
-    Interval: 24 * time.Hour,
-    LogPaths: []string{"./logs"},
-}
-```
-
-## 配置说明
-
-### 文件管理配置
-```go
-type FileOptions struct {
-BufferSize int // 写入缓冲区大小
-FlushInterval time.Duration // 刷新间隔
-MaxOpenFiles int // 最大打开文件数
-DefaultPath string // 默认日志文件路径
-}
-```
-### 异步配置
-```go
-type AsyncConfig struct {
-Enable bool // 是否启用异步写入
-BufferSize int // 缓冲区大小
-FlushInterval time.Duration // 定期刷新间隔
-BlockOnFull bool // 缓冲区满时是否阻塞
-DropOnFull bool // 缓冲区满时是否丢弃
-FlushOnExit bool // 退出时是否刷新缓冲区
-}
-```
-### ELK 配置
+### ELK配置
 ```go
 type ElkConfig struct {
-Addresses []string // ES 服务器地址
-Username string // 用户名
-Password string // 密码
-Index string // 索引名称
-Timeout time.Duration // 超时时间
+    // 连接配置
+    Addresses    []string      // ES地址
+    Username     string        // 用户名
+    Password     string        // 密码
+    Timeout      time.Duration // 超时时间
+    
+    // 索引配置
+    Index        string // 索引名称
+    IndexPattern string // 索引模式
+    Type         string // 文档类型
+    
+    // 批处理配置
+    BatchSize    int           // 批量大小
+    FlushBytes   int          // 刷新字节数
+    FlushTimeout time.Duration // 刷新超时
+    
+    // 重试配置
+    MaxRetries   int           // 最大重试次数
+    RetryTimeout time.Duration // 重试超时
 }
 ```
 
+## 高级特性
 
+### 异步处理
+```go
+// 配置异步处理
+opts := &Options{
+    Async: true,
+    QueueSize: 10000,
+    FlushInterval: time.Second,
+}
 
+// 优雅关闭
+defer logger.Close()
+```
+
+### 批量处理
+```go
+// 配置批量处理
+bulkConfig := &elk.BulkConfig{
+    BatchSize: 1000,
+    FlushBytes: 5 * 1024 * 1024,
+    FlushTimeout: time.Second,
+}
+
+// 获取统计信息
+stats := bulk.Stats()
+fmt.Printf("处理文档数: %d\n", stats.ProcessedDocs)
+```
+
+### 错误重试
+```go
+// 配置重试策略
+retryConfig := &elk.RetryConfig{
+    MaxRetries: 3,
+    RetryTimeout: time.Second * 30,
+}
+
+// 使用重试
+err := elk.WithRetry(ctx, retryConfig, func() error {
+    return client.Index(doc)
+})
+```
+
+## 性能优化
+
+### 内存优化
+1. 对象池
+```go
+// 配置对象池
+pool := &sync.Pool{
+    New: func() interface{} {
+        return make([]byte, 0, 1024)
+    },
+}
+
+// 使用对象池
+buf := pool.Get().([]byte)
+defer pool.Put(buf)
+```
+
+2. 批量处理
+```go
+// 配置批量参数
+opts := &Options{
+    BatchSize: 1000,      // 批量大小
+    FlushInterval: time.Second, // 刷新间隔
+}
+```
+
+3. 异步处理
+```go
+// 配置异步
+opts := &Options{
+    Async: true,
+    QueueSize: 10000,
+}
+```
+
+### 写入优化
+1. 文件缓冲
+```go
+// 配置文件缓冲
+opts := &Options{
+    BufferSize: 256 * 1024, // 256KB
+}
+```
+
+2. 批量写入
+```go
+// 配置批量写入
+opts := &Options{
+    BatchSize: 100,
+    FlushInterval: time.Second,
+}
+```
+
+## 监控指标
+
+### 基础指标
+- 总处理日志数
+- 处理失败数
+- 平均处理延迟
+- 队列大小
+- 内存使用量
+
+### ELK指标
+- 索引文档数
+- 索引延迟
+- 批量大小
+- 重试次数
+- 错误率
+
+### 监控示例
+```go
+// 获取指标
+metrics := logger.Metrics()
+fmt.Printf("处理总数: %d\n", metrics.TotalLogs)
+fmt.Printf("失败数: %d\n", metrics.FailedLogs)
+fmt.Printf("平均延迟: %v\n", metrics.AvgLatency)
+```
 
 ## 最佳实践
 
+### 日志级别使用
+- DEBUG: 调试信息
+- INFO: 正常业务流程
+- WARN: 需要注意的问题
+- ERROR: 错误信息
+- FATAL: 致命错误
+
 ### 性能优化建议
-1. 日志级别使用建议
-   - DEBUG: 开发环境使用，用于调试
-   - INFO: 记录正常的业务流程
-   - WARN: 记录需要注意但不影响系统运行的问题
-   - ERROR: 记录影响当前操作的错误
-   - FATAL: 记录需要立即处理的严重问题
+1. 合理配置
+   - 根据业务量配置队列大小
+   - 根据内存配置批量参数
+   - 设置合适的刷新间隔
 
-2. 性能优化
-   - 生产环境建议启用异步写入
-   - 合理配置批处理大小和刷新间隔
-   - 定期清理过期日志
-   - 使用结构化的日志格式
+2. 内存管理
+   - 使用对象池
+   - 控制单条日志大小
+   - 及时清理过期日志
 
-3. 合理配置批处理参数
-   - BatchSize: 根据日志量设置,通常 100-1000
-   - FlushBytes: 根据内存使用情况设置,通常 1-5MB
-   - Interval: 根据实时性要求设置,通常 1-5秒
-
-4. 内存管理
-   - 使用缓冲池减少内存分配
-   - 合理设置单个文档大小限制
-   - 定期清理过期日志
-
-5. 错误处理
-   - 实现自定义错误处理器
-   - 合理配置重试机制
-   - 记录错误统计信息
-
-6. ELK 集成优化
+3. 写入优化
+   - 启用异步处理
    - 使用批量写入
-   - 合理设置索引分片
+   - 配置文件缓冲
+
+### ELK最佳实践
+1. 索引管理
+   - 使用索引模板
    - 定期优化索引
+   - 设置合理的分片
 
-7. ELK 集成建议
-   - 合理设置批处理参数
-   - 配置错误重试机制
-   - 监控日志队列大小
-   - 定期检查 ES 连接状态
+2. 批量处理
+   - 合理的批量大小
+   - 适当的刷新间隔
+   - 监控处理延迟
 
-### 监控指标
-1. 日志统计
-   - 总处理文档数
-   - 总处理字节数
-   - 刷新次数
-   - 错误次数
-   - 最后错误信息
-   - 最后刷新时间
-
-2. 性能指标
-   - 写入队列大小
-   - 批处理延迟
-   - 写入成功率
-   - 重试次数
+3. 错误处理
+   - 配置重试策略
+   - 记录错误日志
+   - 监控错误率
 
 ## 常见问题
 
-1. 日志丢失问题
-   - 检查异步配置
-   - 验证队列大小设置
-   - 确认刷新间隔合理性
-   - 查看错误处理配置
+### 1. 性能问题
+问题: 日志处理延迟高
+解决:
+- 检查队列大小配置
+- 优化批量处理参数
+- 确认磁盘性能
+- 监控系统资源
 
-2. 性能问题
-   - 调整批处理参数
-   - 优化索引配置
-   - 使用缓冲池
-   - 合理设置压缩级别
+### 2. 内存问题
+问题: 内存使用过高
+解决:
+- 使用对象池
+- 控制队列大小
+- 及时清理日志
+- 监控内存使用
 
-3. ELK 连接问题
-   - 验证网络连接
-   - 检查认证信息
-   - 确认集群状态
-   - 查看重试配置
+### 3. ELK问题
+问题: 写入ES失败
+解决:
+- 检查网络连接
+- 验证认证信息
+- 确认集群状态
+- 查看错误日志
 
+## 开发计划
 
-## 常见问题
+### 1. Kafka集成
+目标: 解决直接写入ELK的压力
+```
+[Service] --> [Kafka] --> [Logstash] --> [Elasticsearch]
+```
 
-1. 日志写入失败
-   - 检查文件权限
-   - 确认磁盘空间
-   - 查看文件描述符限制
+### 2. Redis集成
+目标: 提供限流和缓存支持
+```
+[Service] --> [Redis] --> [Kafka] --> [Logstash] --> [Elasticsearch]
+```
 
-2. ELK 连接问题
-   - 验证 ES 服务可用性
-   - 检查网络连接
-   - 确认认证信息正确
+### 3. 监控增强
+- Prometheus集成
+- Grafana面板
+- 告警支持
 
-3. 性能问题
-   - 调整批处理参数
-   - 优化日志级别
-   - 检查磁盘 IO
-   - 监控内存使用
-
-# 待完成
-
-1. Kafka 集成, 消除直接写入ELK, 降低写入压力, 同时支持数据持久化, 避免丢失数据
-2. 集成Redis, 提升性能\
-计划流程
-
-[Service] --> [Redis Rate Limiter] --> [Kafka] --> [Logstash] --> [Elasticsearch]
- ---------------------↑ 限流控制------------------↑ 消息队列--↑ 批量处理
-
+### 4. 功能增强
+- 日志加密
+- 字段脱敏
+- 日志审计
+- 实时分析

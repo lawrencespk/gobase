@@ -236,3 +236,16 @@ func WithElkConfig(config *elk.ElkConfig) Option {
 		opts.ElkConfig = config
 	}
 }
+
+// AddWriter 添加输出writer
+func (o *Options) AddWriter(w io.Writer) {
+	if o.writers == nil {
+		o.writers = make([]io.Writer, 0)
+	}
+	o.writers = append(o.writers, w)
+}
+
+// GetWriters 获取所有writers
+func (o *Options) GetWriters() []io.Writer {
+	return o.writers
+}

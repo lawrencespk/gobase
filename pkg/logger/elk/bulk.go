@@ -48,9 +48,10 @@ type BulkProcessorConfig struct {
 	FlushBytes   int64         // 触发刷新的字节数
 	Interval     time.Duration // 自动刷新的时间间隔
 	DefaultIndex string        // 默认索引名称
-	RetryCount   int           // 新增：重试次数
-	RetryWait    time.Duration // 新增：重试等待时间
-	CloseTimeout time.Duration // 新增：关闭超时时间
+	RetryCount   int           // 重试次数
+	RetryWait    time.Duration // 初始重试等待时间
+	MaxWait      time.Duration // 最大重试等待时间
+	CloseTimeout time.Duration // 关闭超时时间
 }
 
 // indexedDocument 包装文档和其目标索引

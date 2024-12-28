@@ -1,12 +1,13 @@
 package unit
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"gobase/pkg/logger"
-	"gobase/pkg/logger/logrus"
+	"gobase/pkg/logger/elk"
 	"gobase/pkg/logger/types"
 )
 
@@ -61,14 +62,13 @@ func TestNewLogger(t *testing.T) {
 	// 测试自定义配置
 	t.Run("Custom Config", func(t *testing.T) {
 		customLevel := types.DebugLevel
-		opt := logrus.WithLevel(customLevel)
+		opt := logger.WithLevel(customLevel)
 
 		log, err := logger.NewLogger(opt)
 		if err != nil {
 			t.Errorf("NewLogger failed with custom config: %v", err)
 		}
 
-		// 检查日志级别，但不进行具体类型断言
 		if log == nil {
 			t.Error("NewLogger should not return nil logger")
 			return
@@ -108,7 +108,7 @@ func TestFactory(t *testing.T) {
 	t.Run("Custom Options", func(t *testing.T) {
 		factory := logger.NewFactory("logrus")
 		customLevel := types.DebugLevel
-		log, err := factory.Create(logrus.WithLevel(customLevel))
+		log, err := factory.Create(logger.WithLevel(customLevel))
 
 		if err != nil {
 			t.Errorf("Factory Create failed with custom options: %v", err)
@@ -156,4 +156,42 @@ func TestLoggerConcurrency(t *testing.T) {
 			t.Error("Concurrent test timed out")
 		}
 	}
+}
+
+// TestLoggerWithHooks 测试带有 hooks 的 logger
+func TestLoggerWithHooks(t *testing.T) {
+	t.Run("Create Logger With Hooks", func(t *testing.T) {
+		factory := logger.NewFactory("logrus")
+		log, err := factory.CreateWithHooks()
+
+		if err != nil {
+			t.Errorf("CreateWithHooks failed: %v", err)
+		}
+		if log == nil {
+			t.Error("CreateWithHooks should not return nil logger")
+			return
+		}
+
+		// 测试 WaitForHooks 方法
+		log.Info(context.Background(), "test message")
+		log.WaitForHooks() // 这应该不会阻塞，因为没有实际的 hooks
+	})
+
+	t.Run("With ELK Hook", func(t *testing.T) {
+		factory := logger.NewFactory("logrus")
+		elkConfig := elk.DefaultElkConfig()
+		log, err := factory.CreateWithHooks(logger.WithELK(elkConfig))
+
+		if err != nil {
+			t.Errorf("CreateWithHooks with ELK failed: %v", err)
+		}
+		if log == nil {
+			t.Error("CreateWithHooks should not return nil logger")
+			return
+		}
+
+		// 测试带有 ELK hook 的日志记录
+		log.Info(context.Background(), "test message with elk")
+		log.WaitForHooks() // 等待 ELK hook 处理完成
+	})
 }
