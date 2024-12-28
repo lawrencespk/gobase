@@ -43,3 +43,9 @@
 ### 14. Redis 缓存
 [Redis 缓存文档](/pkg/cache/redis/README.md)
 
+### 15. Metrics 中间件
+[Metrics 中间件文档](/pkg/middleware/metrics/README.md)
+
+### 16. Logger 中间件
+[Logger 中间件文档](/pkg/middleware/logger/README.md)
+
