@@ -1,10 +1,10 @@
 package collector_test
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
+	"gobase/pkg/errors"
 	"gobase/pkg/monitor/prometheus/collector"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -49,10 +49,10 @@ func TestBusinessCollector(t *testing.T) {
 		ch := make(chan prometheus.Metric, 10)
 
 		// 添加一些测试数据
-		bc.ObserveOperation("test_operation", 0.5, nil)                      // 添加成功操作
-		bc.ObserveOperation("test_operation", 1.0, fmt.Errorf("test error")) // 添加失败操作
-		bc.SetQueueSize("test_queue", 100)                                   // 设置队列大小
-		bc.SetProcessRate("test_operation", 50.0)                            // 设置处理速率
+		bc.ObserveOperation("test_operation", 0.5, nil)                                      // 添加成功操作
+		bc.ObserveOperation("test_operation", 1.0, errors.NewSystemError("test error", nil)) // 添加失败操作
+		bc.SetQueueSize("test_queue", 100)                                                   // 设置队列大小
+		bc.SetProcessRate("test_operation", 50.0)                                            // 设置处理速率
 
 		// Act
 		bc.Collect(ch)

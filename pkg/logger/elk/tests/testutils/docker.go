@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 )
 
 // DockerEnvironment 管理测试用的Docker环境
@@ -29,7 +32,8 @@ func (d *DockerEnvironment) StartEnvironment(ctx context.Context) error {
 		"up", "-d")
 
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to start docker environment: %v, output: %s", err, output)
+		return errors.WrapWithCode(err, codes.ThirdPartyError,
+			fmt.Sprintf("failed to start docker environment: %s", string(output)))
 	}
 
 	return d.waitForServices(ctx)
@@ -43,7 +47,8 @@ func (d *DockerEnvironment) StopEnvironment(ctx context.Context) error {
 		"down", "-v")
 
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to stop docker environment: %v, output: %s", err, output)
+		return errors.WrapWithCode(err, codes.ThirdPartyError,
+			fmt.Sprintf("failed to stop docker environment: %s", string(output)))
 	}
 
 	return nil
@@ -59,5 +64,5 @@ func (d *DockerEnvironment) waitForServices(ctx context.Context) error {
 		}
 		time.Sleep(2 * time.Second)
 	}
-	return fmt.Errorf("timeout waiting for services to be ready")
+	return errors.NewError(codes.TimeoutError, "timeout waiting for services to be ready", nil)
 }

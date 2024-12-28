@@ -1,7 +1,7 @@
 package metric
 
 import (
-	"fmt"
+	"gobase/pkg/errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -64,7 +64,7 @@ func (c *Counter) Register() error {
 	if c.counter != nil {
 		return prometheus.Register(c.counter)
 	}
-	return fmt.Errorf("no counter or counter vec initialized")
+	return errors.NewValidationError("no counter or counter vec initialized", nil)
 }
 
 // GetCollector 返回底层的 prometheus.Collector

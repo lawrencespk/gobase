@@ -1,10 +1,8 @@
 package logrus
 
 import (
-	"fmt"
 	"io"
 	"runtime/debug"
-	"strings"
 	"sync"
 	"time"
 
@@ -53,7 +51,7 @@ func (w *RecoveryWriter) Write(p []byte) (n int, err error) {
 				if w.config.PanicHandler != nil { // 如果panic处理器不为空
 					w.config.PanicHandler(r, debug.Stack()) // 调用panic处理器
 				}
-				err = errors.NewSystemError("panic during write", fmt.Errorf("%v", r)) // 设置错误
+				err = errors.NewSystemError("panic during write operation", nil) // 设置错误
 			}
 		}()
 		n, err = w.writer.Write(p) // 写入数据
@@ -65,7 +63,7 @@ func (w *RecoveryWriter) Write(p []byte) (n int, err error) {
 	}
 
 	// 如果是panic导致的错误，不进行重试
-	if err != nil && strings.Contains(err.Error(), "panic during write") { // 如果错误包含panic信息
+	if errors.IsSystemError(err) { // 使用错误类型检查替代字符串检查
 		return 0, err // 返回错误
 	}
 
@@ -109,11 +107,12 @@ func (w *RecoveryWriter) WaitForRetries() {
 	w.wg.Wait() // 等待重试完成
 }
 
+// CleanupRetries 清理所有重试
 func (w *RecoveryWriter) CleanupRetries() {
 	w.WaitForRetries() // 等待重试完成
 }
 
-// 实现 io.Closer 接口
+// Close 实现 io.Closer 接口
 func (w *RecoveryWriter) Close() error {
 	w.mu.Lock()
 	if w.retrying { // 如果正在重试

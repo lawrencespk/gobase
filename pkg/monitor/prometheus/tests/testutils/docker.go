@@ -2,11 +2,11 @@ package testutils
 
 import (
 	"context"
-	"fmt"
-	"log"
 	"os"
 	"testing"
 	"time"
+
+	"gobase/pkg/errors"
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -25,14 +25,16 @@ func (p *PrometheusContainer) Terminate(ctx context.Context) error {
 		timeout := 10 * time.Second
 		if err := p.Container.Stop(ctx, &timeout); err != nil {
 			// 如果停止失败，记录错误但继续尝试终止
-			log.Printf("Warning: failed to stop container: %v", err)
+			return errors.NewSystemError("failed to stop container", err)
 		}
 
 		// 等待容器完全停止
 		time.Sleep(2 * time.Second)
 
 		// 终止容器
-		return p.Container.Terminate(ctx)
+		if err := p.Container.Terminate(ctx); err != nil {
+			return errors.NewSystemError("failed to terminate container", err)
+		}
 	}
 	return nil
 }
@@ -57,15 +59,15 @@ scrape_configs:
 	// 创建临时配置文件
 	tmpConfigFile, err := os.CreateTemp("", "prometheus-*.yml")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp config: %v", err)
+		return nil, errors.NewSystemError("failed to create temp config file", err)
 	}
 	defer os.Remove(tmpConfigFile.Name())
 
 	if _, err := tmpConfigFile.WriteString(configContent); err != nil {
-		return nil, fmt.Errorf("failed to write config: %v", err)
+		return nil, errors.NewSystemError("failed to write config content", err)
 	}
 	if err := tmpConfigFile.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close config file: %v", err)
+		return nil, errors.NewSystemError("failed to close config file", err)
 	}
 
 	req := testcontainers.ContainerRequest{
@@ -88,7 +90,7 @@ scrape_configs:
 		Started:          true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to start container: %v", err)
+		return nil, errors.NewSystemError("failed to start container", err)
 	}
 
 	// 获取容器映射端口
@@ -98,7 +100,7 @@ scrape_configs:
 		if termErr := container.Terminate(ctx); termErr != nil {
 			t.Logf("Warning: failed to terminate container after port mapping error: %v", termErr)
 		}
-		return nil, fmt.Errorf("failed to get mapped port: %v", err)
+		return nil, errors.NewSystemError("failed to get mapped port", err)
 	}
 
 	// 获取容器主机
@@ -108,16 +110,19 @@ scrape_configs:
 		if termErr := container.Terminate(ctx); termErr != nil {
 			t.Logf("Warning: failed to terminate container after host error: %v", termErr)
 		}
-		return nil, fmt.Errorf("failed to get host: %v", err)
+		return nil, errors.NewSystemError("failed to get container host", err)
 	}
 
 	return &PrometheusContainer{
 		Container: container,
-		URI:       fmt.Sprintf("http://%s:%s", host, mappedPort.Port()),
+		URI:       "http://" + host + ":" + mappedPort.Port(),
 	}, nil
 }
 
 // Stop 停止并清理容器
 func (pc *PrometheusContainer) Stop() error {
-	return pc.Container.Terminate(context.Background())
+	if err := pc.Container.Terminate(context.Background()); err != nil {
+		return errors.NewSystemError("failed to stop container", err)
+	}
+	return nil
 }

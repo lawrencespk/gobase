@@ -2,7 +2,6 @@ package integration
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,8 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"gobase/pkg/config"
-	"gobase/pkg/logger"
-	"gobase/pkg/logger/types"
 	"gobase/pkg/trace/jaeger/tests/testutils"
 )
 
@@ -21,17 +18,7 @@ var (
 	once           sync.Once
 	instance       *testHelper
 	containerReady bool
-	log            types.Logger
 )
-
-func init() {
-	// 初始化日志
-	var err error
-	log, err = logger.NewLogger()
-	if err != nil {
-		panic(fmt.Sprintf("failed to create logger: %v", err))
-	}
-}
 
 type testHelper struct {
 	cleanup func()
@@ -100,8 +87,6 @@ func setupTest(t *testing.T) *testHelper {
 
 	return instance
 }
-
-// 添加辅助方
 
 // WaitForSpans 等待span上报完成
 func WaitForSpans(duration time.Duration) {

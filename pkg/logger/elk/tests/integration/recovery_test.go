@@ -2,11 +2,14 @@ package integration
 
 import (
 	"context"
-	"fmt"
-	"gobase/pkg/logger/elk"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
+	"gobase/pkg/logger/elk"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -73,7 +76,7 @@ func TestRecoveryMechanism(t *testing.T) {
 	operation := func() error {
 		if atomic.LoadInt32(&failureCount) < 2 {
 			atomic.AddInt32(&failureCount, 1)
-			return fmt.Errorf("模拟操作失败 %d", atomic.LoadInt32(&failureCount))
+			return errors.NewError(codes.ELKBulkError, "模拟操作失败", nil)
 		}
 		return nil
 	}
@@ -100,7 +103,7 @@ func TestRecoveryMechanism(t *testing.T) {
 		// 发送一些测试文档
 		for i := 0; i < 5; i++ {
 			entry := &logrus.Entry{
-				Message: fmt.Sprintf("test message %d", i),
+				Message: "test message " + strconv.Itoa(i),
 				Time:    time.Now(),
 				Level:   logrus.InfoLevel,
 			}
@@ -122,7 +125,7 @@ func TestRecoveryMechanism(t *testing.T) {
 		// 发送更多文档
 		for i := 5; i < 10; i++ {
 			entry := &logrus.Entry{
-				Message: fmt.Sprintf("test message %d", i),
+				Message: "test message " + strconv.Itoa(i),
 				Time:    time.Now(),
 				Level:   logrus.InfoLevel,
 			}
@@ -167,7 +170,7 @@ func TestRecoveryMechanism(t *testing.T) {
 			Time:    time.Now(),
 			Level:   logrus.ErrorLevel,
 			Data: logrus.Fields{
-				"error": fmt.Errorf("test error"),
+				"error": errors.NewError(codes.ELKBulkError, "test error", nil),
 			},
 		}
 
@@ -192,7 +195,6 @@ func TestRecoveryMechanism(t *testing.T) {
 		assert.NotNil(t, stats)
 
 		// 验证文档是否写入成功
-		// 添加查询来验证具体的文档内容
 		query := map[string]interface{}{
 			"query": map[string]interface{}{
 				"match": map[string]interface{}{

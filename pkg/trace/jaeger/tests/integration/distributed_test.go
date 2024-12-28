@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gobase/pkg/errors"
 	"gobase/pkg/trace/jaeger"
 )
 
@@ -27,8 +27,7 @@ func newMockService(name string, next *mockService) (*mockService, error) {
 	// 创建服务专用的tracer
 	provider, err := jaeger.NewProvider()
 	if err != nil {
-		log.Errorf(context.Background(), "create provider error: %v", err)
-		return nil, fmt.Errorf("create provider error: %v", err)
+		return nil, errors.NewThirdPartyError("failed to create jaeger provider", err)
 	}
 
 	svc := &mockService{

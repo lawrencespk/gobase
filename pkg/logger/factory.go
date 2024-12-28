@@ -140,7 +140,7 @@ func NewLogger(opts ...Option) (types.Logger, error) {
 	// 创建 logrus logger
 	logrusLogger, err := logrus.NewLogger(nil, queueConfig, logrusOptions)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create logger: %v", err)
+		return nil, errors.NewSystemError("failed to create logger", err)
 	}
 
 	return logrusLogger, nil

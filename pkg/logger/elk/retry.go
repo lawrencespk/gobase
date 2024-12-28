@@ -2,7 +2,7 @@ package elk
 
 import (
 	"context"
-	"fmt"
+	"gobase/pkg/errors"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -37,7 +37,7 @@ func WithRetry(ctx context.Context, config RetryConfig, operation RetryableFunc,
 
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("operation cancelled or timed out: %w", ctx.Err())
+			return errors.NewSystemError("operation cancelled or timed out", ctx.Err())
 		default:
 		}
 
@@ -73,7 +73,7 @@ func WithRetry(ctx context.Context, config RetryConfig, operation RetryableFunc,
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return fmt.Errorf("operation cancelled or timed out during retry: %w", ctx.Err())
+			return errors.NewSystemError("operation cancelled or timed out during retry", ctx.Err())
 		case <-timer.C:
 		}
 

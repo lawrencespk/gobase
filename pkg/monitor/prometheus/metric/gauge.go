@@ -1,7 +1,7 @@
 package metric
 
 import (
-	"fmt"
+	"gobase/pkg/errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -105,7 +105,7 @@ func (g *Gauge) Register() error {
 	if g.gauge != nil {
 		return prometheus.Register(g.gauge)
 	}
-	return fmt.Errorf("no gauge or gauge vec initialized")
+	return errors.NewValidationError("no gauge or gauge vec initialized", nil)
 }
 
 // GetCollector 返回底层的 prometheus.Collector

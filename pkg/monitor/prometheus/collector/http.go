@@ -5,6 +5,8 @@ import (
 	"gobase/pkg/monitor/prometheus/metric"
 	"time"
 
+	"gobase/pkg/errors"
+
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -81,32 +83,32 @@ func (c *HTTPCollector) Register() error {
 	// 先注册各个指标
 	if c.requestTotal != nil {
 		if err := c.requestTotal.Register(); err != nil {
-			return fmt.Errorf("failed to register request total: %w", err)
+			return errors.NewSystemError("failed to register request total", err)
 		}
 	}
 	if c.requestDuration != nil {
 		if err := c.requestDuration.Register(); err != nil {
-			return fmt.Errorf("failed to register request duration: %w", err)
+			return errors.NewSystemError("failed to register request duration", err)
 		}
 	}
 	if c.activeRequests != nil {
 		if err := c.activeRequests.Register(); err != nil {
-			return fmt.Errorf("failed to register active requests: %w", err)
+			return errors.NewSystemError("failed to register active requests", err)
 		}
 	}
 	if c.requestSize != nil {
 		if err := c.requestSize.Register(); err != nil {
-			return fmt.Errorf("failed to register request size: %w", err)
+			return errors.NewSystemError("failed to register request size", err)
 		}
 	}
 	if c.responseSize != nil {
 		if err := c.responseSize.Register(); err != nil {
-			return fmt.Errorf("failed to register response size: %w", err)
+			return errors.NewSystemError("failed to register response size", err)
 		}
 	}
 	if c.slowRequests != nil {
 		if err := c.slowRequests.Register(); err != nil {
-			return fmt.Errorf("failed to register slow requests: %w", err)
+			return errors.NewSystemError("failed to register slow requests", err)
 		}
 	}
 

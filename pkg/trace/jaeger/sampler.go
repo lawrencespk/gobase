@@ -174,31 +174,31 @@ func (s *Sampler) updateAdaptiveSampling(operation string, latency time.Duration
 // validateSamplerConfig 验证采样配置
 func validateSamplerConfig(config *SamplerConfig) error {
 	if config == nil {
-		return fmt.Errorf("sampler config is nil")
+		return errors.NewValidationError("sampler config is nil", nil)
 	}
 
 	switch config.Type {
 	case "const":
 		if config.Param != 0 && config.Param != 1 {
-			return fmt.Errorf("const sampler param must be 0 or 1")
+			return errors.NewValidationError("const sampler param must be 0 or 1", nil)
 		}
 	case "probabilistic":
 		if config.Param < 0 || config.Param > 1 {
-			return fmt.Errorf("probabilistic sampler param must be between 0 and 1")
+			return errors.NewValidationError("probabilistic sampler param must be between 0 and 1", nil)
 		}
 	case "rateLimiting":
 		if config.RateLimit <= 0 {
-			return fmt.Errorf("rate limiting sampler rate limit must be positive")
+			return errors.NewValidationError("rate limiting sampler rate limit must be positive", nil)
 		}
 	case "remote":
 		if config.ServerURL == "" {
-			return fmt.Errorf("remote sampler requires server URL")
+			return errors.NewValidationError("remote sampler requires server URL", nil)
 		}
 		if config.RefreshInterval <= 0 {
-			return fmt.Errorf("remote sampler refresh interval must be positive")
+			return errors.NewValidationError("remote sampler refresh interval must be positive", nil)
 		}
 	default:
-		return fmt.Errorf("unknown sampler type: %s", config.Type)
+		return errors.NewValidationError(fmt.Sprintf("unknown sampler type: %s", config.Type), nil)
 	}
 
 	return nil

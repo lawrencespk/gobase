@@ -333,12 +333,12 @@ func (c *ElkClient) HealthCheck(ctx context.Context) error {
 		c.client.Cluster.Health.WithContext(ctx),
 	)
 	if err != nil {
-		return fmt.Errorf("health check failed: %w", err)
+		return errors.NewELKConnectionError("health check failed", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.IsError() {
-		return fmt.Errorf("health check response error: %s", resp.String())
+		return errors.NewELKConnectionError("health check response error", nil)
 	}
 
 	return nil
@@ -347,7 +347,7 @@ func (c *ElkClient) HealthCheck(ctx context.Context) error {
 func (c *ElkClient) CreateIndex(ctx context.Context, indexName string, mapping *IndexMapping) error {
 	body, err := json.Marshal(mapping)
 	if err != nil {
-		return fmt.Errorf("failed to marshal index mapping: %w", err)
+		return errors.NewELKIndexError("failed to marshal index mapping", err)
 	}
 
 	resp, err := c.client.Indices.Create(
@@ -356,12 +356,12 @@ func (c *ElkClient) CreateIndex(ctx context.Context, indexName string, mapping *
 		c.client.Indices.Create.WithContext(ctx),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create index: %w", err)
+		return errors.NewELKIndexError("failed to create index", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.IsError() {
-		return fmt.Errorf("index creation response error: %s", resp.String())
+		return errors.NewELKIndexError("index creation failed", nil)
 	}
 
 	return nil
@@ -374,12 +374,12 @@ func (c *ElkClient) RefreshIndex(ctx context.Context, index string) error {
 	}
 	res, err := req.Do(ctx, c.client)
 	if err != nil {
-		return err
+		return errors.NewELKIndexError("failed to refresh index", err)
 	}
 	defer res.Body.Close()
 
 	if res.IsError() {
-		return fmt.Errorf("刷新索引失败: %s", res.String())
+		return errors.NewELKIndexError("index refresh failed", nil)
 	}
 	return nil
 }
@@ -392,17 +392,17 @@ func (c *ElkClient) GetIndexStats(ctx context.Context, index string) (map[string
 
 	res, err := req.Do(ctx, c.client)
 	if err != nil {
-		return nil, err
+		return nil, errors.NewELKIndexError("failed to get index stats", err)
 	}
 	defer res.Body.Close()
 
 	if res.IsError() {
-		return nil, fmt.Errorf("获取索引统计失败: %s", res.String())
+		return nil, errors.NewELKIndexError("failed to get index stats", nil)
 	}
 
 	var stats map[string]interface{}
 	if err := json.NewDecoder(res.Body).Decode(&stats); err != nil {
-		return nil, fmt.Errorf("解析统计信息失败: %w", err)
+		return nil, errors.NewELKIndexError("failed to parse index stats", err)
 	}
 
 	return stats, nil

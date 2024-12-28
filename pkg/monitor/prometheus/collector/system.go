@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"gobase/pkg/errors"
 	"gobase/pkg/monitor/prometheus/metric"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -209,7 +210,7 @@ func (c *SystemCollector) collect() error {
 	// 收集系统内存使用情况
 	vmStat, err := mem.VirtualMemory()
 	if err != nil {
-		return fmt.Errorf("获取系统内存信息失败: %v", err)
+		return errors.NewSystemError("failed to get system memory info", err)
 	}
 
 	// 设置系统内存使用量 (单位：字节)
@@ -313,7 +314,7 @@ func getLoadAverage() (float64, error) {
 		// Windows 不支持获取系统负载，返回 CPU 使用率作为替代
 		cpuPercent, err := cpu.Percent(0, false)
 		if err != nil {
-			return 0, fmt.Errorf("获取CPU使用率失败: %v", err)
+			return 0, errors.NewSystemError("failed to get CPU usage", err)
 		}
 		if len(cpuPercent) > 0 {
 			return cpuPercent[0], nil
@@ -324,17 +325,17 @@ func getLoadAverage() (float64, error) {
 	// Linux 系统
 	data, err := os.ReadFile("/proc/loadavg")
 	if err != nil {
-		return 0, fmt.Errorf("读取系统负载失败: %v", err)
+		return 0, errors.NewSystemError("failed to read system load", err)
 	}
 
 	fields := strings.Fields(string(data))
 	if len(fields) < 1 {
-		return 0, fmt.Errorf("无效的系统负载数据")
+		return 0, errors.NewValidationError("invalid system load data", nil)
 	}
 
 	load, err := strconv.ParseFloat(fields[0], 64)
 	if err != nil {
-		return 0, fmt.Errorf("解析系统负载失败: %v", err)
+		return 0, errors.NewValidationError("failed to parse system load", err)
 	}
 	return load, nil
 }
@@ -343,7 +344,7 @@ func getLoadAverage() (float64, error) {
 func getOpenFDs() (int, error) {
 	proc, err := process.NewProcess(int32(os.Getpid()))
 	if err != nil {
-		return 0, fmt.Errorf("获取进程信息失败: %v", err)
+		return 0, errors.NewSystemError("failed to get process info", err)
 	}
 
 	if runtime.GOOS == "windows" {
@@ -351,11 +352,11 @@ func getOpenFDs() (int, error) {
 		cmd := exec.Command("powershell", "-Command", "Get-Process -Id", strconv.Itoa(os.Getpid()), "| Select-Object -ExpandProperty HandleCount")
 		output, err := cmd.Output()
 		if err != nil {
-			return 0, fmt.Errorf("获取句柄数失败: %v", err)
+			return 0, errors.NewSystemError("failed to get handle count", err)
 		}
 		handleCount, err := strconv.Atoi(strings.TrimSpace(string(output)))
 		if err != nil {
-			return 0, fmt.Errorf("解析句柄数失败: %v", err)
+			return 0, errors.NewValidationError("failed to parse handle count", err)
 		}
 		return handleCount, nil
 	}
@@ -363,7 +364,7 @@ func getOpenFDs() (int, error) {
 	// Linux 系统
 	fds, err := proc.NumFDs()
 	if err != nil {
-		return 0, fmt.Errorf("获取文件描述符数量失败: %v", err)
+		return 0, errors.NewSystemError("failed to get file descriptor count", err)
 	}
 	return int(fds), nil
 }
@@ -403,15 +404,15 @@ func (c *SystemCollector) getNetworkConnections() (int, error) {
 		select {
 		case <-done:
 			if err != nil {
-				lastErr = fmt.Errorf("获取网络连接信息失败: %v", err)
+				lastErr = errors.NewSystemError("failed to get network connections", err)
 				continue
 			}
 			return len(conns), nil
 		case <-canceled:
-			lastErr = fmt.Errorf("获取进程信息失败: %v", err)
+			lastErr = errors.NewSystemError("failed to get process info", err)
 			continue
 		case <-ctx.Done():
-			lastErr = fmt.Errorf("获取网络连接信息超时(尝试 %d/%d)", i+1, maxRetries)
+			lastErr = errors.NewSystemError("timeout getting network connections", errors.NewSystemError(fmt.Sprintf("attempt %d/%d", i+1, maxRetries), nil))
 			continue
 		}
 	}

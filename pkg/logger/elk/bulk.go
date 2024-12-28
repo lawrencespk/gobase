@@ -3,7 +3,6 @@ package elk
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -137,7 +136,6 @@ func NewBulkProcessor(client Client, config *BulkProcessorConfig) BulkProcessor 
 // withRetry 包装需要重试的操作
 func (bp *bulkProcessor) withRetry(ctx context.Context, operation func(context.Context) error) error {
 	var lastErr error
-	// 初始尝试 + 重试次数
 	maxAttempts := bp.config.RetryCount + 1
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -145,7 +143,7 @@ func (bp *bulkProcessor) withRetry(ctx context.Context, operation func(context.C
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return errors.WrapWithCode(ctx.Err(), codes.ELKTimeoutError, "operation cancelled during retry wait")
 			case <-time.After(bp.config.RetryWait):
 			}
 		}
@@ -161,19 +159,20 @@ func (bp *bulkProcessor) withRetry(ctx context.Context, operation func(context.C
 
 		// 如果是最后一次尝试，返回错误
 		if attempt == maxAttempts-1 {
-			return fmt.Errorf("failed to flush documents: %w", lastErr)
+			return errors.WrapWithCode(lastErr, codes.ELKBulkError, "max retry attempts reached")
 		}
 	}
 
-	return lastErr // 这行实际上永远不会执行到
+	return lastErr
 }
 
+// Add 添加文档到批处理器
 func (bp *bulkProcessor) Add(ctx context.Context, index string, doc interface{}) error {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
 
 	if bp.closed {
-		return ErrProcessorClosed
+		return errors.NewError(codes.ELKBulkError, "processor is closed", nil)
 	}
 
 	// 计算文档大小
@@ -184,20 +183,20 @@ func (bp *bulkProcessor) Add(ctx context.Context, index string, doc interface{})
 
 	// 检查单个文档大小是否超过限制
 	if docSize > bp.config.FlushBytes {
-		return ErrDocumentTooLarge
+		return errors.NewError(codes.ELKBulkError, "document size exceeds maximum allowed size", nil)
 	}
 
 	// 如果当前批次大小加上新文档会超过限制，先刷新
 	if bp.bytesSize+docSize > bp.config.FlushBytes {
 		if err := bp.flushLocked(ctx); err != nil {
-			return err
+			return errors.WrapWithCode(err, codes.ELKBulkError, "failed to flush before adding document")
 		}
 	}
 
 	// 添加文档到缓冲区
 	bp.documents = append(bp.documents, indexedDocument{
 		index: index,
-		doc:   doc, // 直接存储文档对象
+		doc:   doc,
 	})
 	bp.bytesSize += docSize
 	bp.totalDocs.Add(1)
@@ -284,12 +283,15 @@ func (bp *bulkProcessor) gracefulClose(ctx context.Context) error {
 
 	select {
 	case err := <-doneChan:
-		return errors.Wrap(err, "error during graceful shutdown")
+		if err != nil {
+			return errors.WrapWithCode(err, codes.ELKBulkError, "error during graceful shutdown")
+		}
+		return nil
 	case <-closeCtx.Done():
 		if closeCtx.Err() == context.DeadlineExceeded {
-			return ErrCloseTimeout
+			return errors.NewError(codes.ELKTimeoutError, "shutdown timeout exceeded", nil)
 		}
-		return errors.Wrap(closeCtx.Err(), "context cancelled during graceful shutdown")
+		return errors.WrapWithCode(closeCtx.Err(), codes.ELKTimeoutError, "context cancelled during shutdown")
 	}
 }
 

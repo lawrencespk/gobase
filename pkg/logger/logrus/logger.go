@@ -511,6 +511,15 @@ type syncer interface {
 	Sync() error
 }
 
+// Write 实现 io.Writer 接口
+func (w *writerHook) Write(p []byte) (n int, err error) {
+	if _, err := w.writer.Write(p); err != nil {
+		return 0, errors.NewLogWriteError("failed to write log entry", err)
+	}
+	return len(p), nil
+}
+
+// Fire 实现 logrus.Hook 接口
 func (h *writerHook) Fire(entry *logrus.Entry) error {
 	line, err := h.formatter.Format(entry)
 	if err != nil {

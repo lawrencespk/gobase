@@ -2,12 +2,13 @@ package testutils
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"gobase/pkg/errors"
 )
 
 // StartJaegerContainer 启动 Jaeger 容器并返回清理函数
@@ -20,14 +21,15 @@ func StartJaegerContainer(ctx context.Context) (func(), error) {
 	// 启动 docker-compose
 	cmd := exec.Command("docker-compose", "-f", dockerComposeFile, "up", "-d")
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("failed to start jaeger container: %v", err)
+		return nil, errors.NewSystemError("failed to start jaeger container", err)
 	}
 
 	// 返回清理函数
 	cleanup := func() {
 		cmd := exec.Command("docker-compose", "-f", dockerComposeFile, "down")
 		if err := cmd.Run(); err != nil {
-			fmt.Printf("failed to stop jaeger container: %v\n", err)
+			// 这里只记录错误，不返回，因为是清理函数
+			errors.NewSystemError("failed to stop jaeger container", err)
 		}
 	}
 
@@ -46,7 +48,7 @@ func WaitForJaeger(ctx context.Context) error {
 	for {
 		select {
 		case <-timeout:
-			return fmt.Errorf("timeout waiting for jaeger to be ready")
+			return errors.NewSystemError("timeout waiting for jaeger to be ready", nil)
 		case <-tick:
 			resp, err := http.Get(url)
 			if err == nil {
@@ -56,7 +58,7 @@ func WaitForJaeger(ctx context.Context) error {
 				}
 			}
 		case <-ctx.Done():
-			return ctx.Err()
+			return errors.NewSystemError("context cancelled while waiting for jaeger", ctx.Err())
 		}
 	}
 }

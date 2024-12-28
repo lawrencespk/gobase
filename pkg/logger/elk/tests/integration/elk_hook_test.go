@@ -3,11 +3,15 @@ package integration
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"gobase/pkg/logger/elk"
+
+	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
@@ -147,7 +151,7 @@ func testBulkLogging(t *testing.T, ctx context.Context, logger *logrus.Logger, c
 					Data:    logrus.Fields{"batch": "test", "worker": workerID},
 					Time:    time.Now(),
 					Level:   logrus.InfoLevel,
-					Message: fmt.Sprintf("Test log message %d", i),
+					Message: "Test log message " + strconv.Itoa(i),
 				}
 
 				if err := hook.Fire(entry); err != nil {
@@ -190,7 +194,7 @@ func testBulkLogging(t *testing.T, ctx context.Context, logger *logrus.Logger, c
 	t.Log("手动刷新索引...")
 	err = client.RefreshIndex(ctx, testIndex)
 	if err != nil {
-		t.Fatalf("刷新索引失败: %v", err)
+		t.Fatal(errors.WrapWithCode(err, codes.ELKBulkError, "刷新索引失败"))
 	}
 
 	// 再次等待并验证
@@ -201,7 +205,7 @@ func testBulkLogging(t *testing.T, ctx context.Context, logger *logrus.Logger, c
 	// 在验证之前手动刷新索引
 	err = client.RefreshIndex(ctx, testIndex)
 	if err != nil {
-		t.Fatalf("刷新索引失败: %v", err)
+		t.Fatal(errors.WrapWithCode(err, codes.ELKBulkError, "刷新索引失败"))
 	}
 
 	// 增加等待时间确保文档可被搜索
@@ -209,7 +213,9 @@ func testBulkLogging(t *testing.T, ctx context.Context, logger *logrus.Logger, c
 
 	// 修改查询条件确保正确匹配
 	count, err := getLogCount(ctx, client, testIndex, "batch", "test")
-	require.NoError(t, err, "查询日志计数失败")
+	if err != nil {
+		t.Fatal(errors.WrapWithCode(err, codes.ELKBulkError, "查询日志计数失败"))
+	}
 
 	if count >= totalLogs {
 		t.Logf("批量日志测试完成，总耗时：%v", time.Since(start))
@@ -223,7 +229,7 @@ func testBulkLogging(t *testing.T, ctx context.Context, logger *logrus.Logger, c
 
 	// 强制刷新索引
 	if err := client.RefreshIndex(ctx, testIndex); err != nil {
-		t.Logf("刷新索引失败: %v", err)
+		t.Fatal(errors.WrapWithCode(err, codes.ELKBulkError, "刷新索引失败"))
 	}
 
 	// 等待一段时间让文档变得可搜索
@@ -241,25 +247,24 @@ func testBulkLogging(t *testing.T, ctx context.Context, logger *logrus.Logger, c
 
 	result, err := client.Query(ctx, testIndex, query)
 	if err != nil {
-		t.Logf("查询失败: %v", err)
-	} else {
-		t.Logf("查询结果详情: %+v", result)
+		t.Fatal(errors.WrapWithCode(err, codes.ELKBulkError, "查询失败"))
 	}
+	t.Logf("查询结果详情: %+v", result)
 
 	// 获取并打印更详细的索引统计信息
 	indexStats, err := client.GetIndexStats(ctx, testIndex)
 	if err != nil {
-		t.Logf("获取索引统计信息失败: %v", err)
-	} else {
-		if stats, ok := indexStats["indices"].(map[string]interface{})[testIndex].(map[string]interface{}); ok {
-			t.Logf("索引详细统计:")
-			t.Logf("- 文档数: %+v", stats["primaries"].(map[string]interface{})["docs"])
-			t.Logf("- 索引操作: %+v", stats["primaries"].(map[string]interface{})["indexing"])
-			t.Logf("- 存储大小: %+v", stats["primaries"].(map[string]interface{})["store"])
-		}
+		t.Fatal(errors.WrapWithCode(err, codes.ELKBulkError, "获取索引统计信息失败"))
 	}
 
-	t.Fatal("未能在规定时间内完成日志写入和验证")
+	if stats, ok := indexStats["indices"].(map[string]interface{})[testIndex].(map[string]interface{}); ok {
+		t.Logf("索引详细统计:")
+		t.Logf("- 文档数: %+v", stats["primaries"].(map[string]interface{})["docs"])
+		t.Logf("- 索引操作: %+v", stats["primaries"].(map[string]interface{})["indexing"])
+		t.Logf("- 存储大小: %+v", stats["primaries"].(map[string]interface{})["store"])
+	}
+
+	t.Fatal(errors.NewError(codes.ELKBulkError, "未能在规定时间内完成日志写入和验证", nil))
 }
 
 func testErrorHandling(t *testing.T, ctx context.Context, logger *logrus.Logger, client *elk.ElkClient, hook *elk.ElkHook, testIndex string) {
@@ -270,7 +275,7 @@ func testCleanup(t *testing.T, ctx context.Context, logger *logrus.Logger, clien
 	// ... 实现清理测试 ...
 }
 
-// 辅助函数获取日志计数
+// getLogCount 辅助函数获取日志计数
 func getLogCount(ctx context.Context, client *elk.ElkClient, index, field, value string) (int, error) {
 	query := map[string]interface{}{
 		"query": map[string]interface{}{
@@ -282,22 +287,22 @@ func getLogCount(ctx context.Context, client *elk.ElkClient, index, field, value
 
 	result, err := client.Query(ctx, index, query)
 	if err != nil {
-		return 0, fmt.Errorf("查询失败: %w", err)
+		return 0, errors.WrapWithCode(err, codes.ELKBulkError, "查询失败")
 	}
 
 	hits, ok := result.(map[string]interface{})["hits"].(map[string]interface{})
 	if !ok {
-		return 0, fmt.Errorf("unexpected response format: %+v", result)
+		return 0, errors.NewError(codes.ELKBulkError, "unexpected response format", nil)
 	}
 
 	total, ok := hits["total"].(map[string]interface{})
 	if !ok {
-		return 0, fmt.Errorf("unexpected total format: %+v", hits)
+		return 0, errors.NewError(codes.ELKBulkError, "unexpected total format", nil)
 	}
 
 	valueFloat, ok := total["value"].(float64)
 	if !ok {
-		return 0, fmt.Errorf("unexpected value format: %+v", total)
+		return 0, errors.NewError(codes.ELKBulkError, "unexpected value format", nil)
 	}
 
 	return int(valueFloat), nil
