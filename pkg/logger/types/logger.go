@@ -77,3 +77,60 @@ type LevelLogger interface {
 	Logger
 	GetLevel() Level // 获取日志级别
 }
+
+// NoopLogger 是一个空实现的日志记录器
+type NoopLogger struct{}
+
+// Debug 实现空的 Debug 日志记录
+func (l *NoopLogger) Debug(ctx context.Context, msg string, fields ...Field) {}
+
+// Info 实现空的 Info 日志记录
+func (l *NoopLogger) Info(ctx context.Context, msg string, fields ...Field) {}
+
+// Warn 实现空的 Warn 日志记录
+func (l *NoopLogger) Warn(ctx context.Context, msg string, fields ...Field) {}
+
+// Error 实现空的 Error 日志记录
+func (l *NoopLogger) Error(ctx context.Context, msg string, fields ...Field) {}
+
+// Fatal 实现空的 Fatal 日志记录
+func (l *NoopLogger) Fatal(ctx context.Context, msg string, fields ...Field) {}
+
+// Debugf 实现空的 Debugf 日志记录
+func (l *NoopLogger) Debugf(ctx context.Context, format string, args ...interface{}) {}
+
+// Infof 实现空的 Infof 日志记录
+func (l *NoopLogger) Infof(ctx context.Context, format string, args ...interface{}) {}
+
+// Warnf 实现空的 Warnf 日志记录
+func (l *NoopLogger) Warnf(ctx context.Context, format string, args ...interface{}) {}
+
+// Errorf 实现空的 Errorf 日志记录
+func (l *NoopLogger) Errorf(ctx context.Context, format string, args ...interface{}) {}
+
+// Fatalf 实现空的 Fatalf 日志记录
+func (l *NoopLogger) Fatalf(ctx context.Context, format string, args ...interface{}) {}
+
+// WithContext 实现空的上下文添加
+func (l *NoopLogger) WithContext(ctx context.Context) Logger { return l }
+
+// WithFields 实现空的字段添加
+func (l *NoopLogger) WithFields(fields ...Field) Logger { return l }
+
+// WithError 实现空的错误添加
+func (l *NoopLogger) WithError(err error) Logger { return l }
+
+// WithTime 实现空的时间添加
+func (l *NoopLogger) WithTime(t time.Time) Logger { return l }
+
+// WithCaller 实现空的调用者添加
+func (l *NoopLogger) WithCaller(skip int) Logger { return l }
+
+// SetLevel 实现空的日志级别设置
+func (l *NoopLogger) SetLevel(level Level) {}
+
+// GetLevel 实现空的日志级别获取
+func (l *NoopLogger) GetLevel() Level { return 0 }
+
+// Sync 实现空的同步操作
+func (l *NoopLogger) Sync() error { return nil }

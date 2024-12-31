@@ -33,8 +33,9 @@ type PoolStats struct {
 	IdleConns uint32
 }
 
+// pool Redis连接池实现
 type pool struct {
-	client *redis.Client
+	client interface{} // 使用 interface{} 来支持不同类型的客户端
 	logger types.Logger
 }
 
@@ -48,7 +49,34 @@ func NewPool(client *redis.Client, logger types.Logger) Pool {
 
 // Stats 获取连接池统计信息
 func (p *pool) Stats() *PoolStats {
-	stats := p.client.PoolStats()
+	switch c := p.client.(type) {
+	case *redis.Client:
+		stats := c.PoolStats()
+		return &PoolStats{
+			Hits:       uint32(stats.Hits),
+			Misses:     uint32(stats.Misses),
+			Timeouts:   uint32(stats.Timeouts),
+			TotalConns: uint32(stats.TotalConns),
+			IdleConns:  uint32(stats.IdleConns),
+		}
+	case *redis.ClusterClient:
+		stats := c.PoolStats()
+		return &PoolStats{
+			Hits:       uint32(stats.Hits),
+			Misses:     uint32(stats.Misses),
+			Timeouts:   uint32(stats.Timeouts),
+			TotalConns: uint32(stats.TotalConns),
+			IdleConns:  uint32(stats.IdleConns),
+		}
+	default:
+		p.logger.Error(context.Background(), "unknown redis client type")
+		return &PoolStats{}
+	}
+}
+
+// PoolStats 获取连接池统计信息
+func (c *client) PoolStats() *PoolStats {
+	stats := c.client.PoolStats()
 	return &PoolStats{
 		Hits:       uint32(stats.Hits),
 		Misses:     uint32(stats.Misses),
@@ -58,12 +86,31 @@ func (p *pool) Stats() *PoolStats {
 	}
 }
 
+// Pool 返回连接池实例
+func (c *client) Pool() Pool {
+	return &pool{
+		client: c.client,
+		logger: c.logger,
+	}
+}
+
 // Close 关闭连接池
 func (p *pool) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := p.client.Close(); err != nil {
+	var err error
+	switch c := p.client.(type) {
+	case *redis.Client:
+		err = c.Close()
+	case *redis.ClusterClient:
+		err = c.Close()
+	default:
+		p.logger.Error(ctx, "unknown redis client type")
+		return errors.NewError(codes.CacheError, "unknown redis client type", nil)
+	}
+
+	if err != nil {
 		p.logger.WithError(err).WithFields(types.Field{
 			Key:   "timeout",
 			Value: "5s",

@@ -38,6 +38,15 @@ type Client interface {
 	// 连接管理
 	Close() error
 	Ping(ctx context.Context) error
+
+	// 监控相关
+	PoolStats() *PoolStats
+
+	// 缓存管理
+	Exists(ctx context.Context, key string) (bool, error)
+
+	// 连接池管理
+	Pool() Pool
 }
 
 // Cache Redis缓存接口
@@ -65,6 +74,25 @@ type Cache interface {
 
 // Pipeline 管道接口
 type Pipeline interface {
+	// 基础操作
+	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
+	Get(ctx context.Context, key string) (string, error)
+	Del(ctx context.Context, keys ...string) (int64, error)
+
+	// Hash操作
+	HSet(ctx context.Context, key string, values ...interface{}) (int64, error)
+	HGet(ctx context.Context, key, field string) (string, error)
+	HDel(ctx context.Context, key string, fields ...string) (int64, error)
+
+	// Set操作
+	SAdd(ctx context.Context, key string, members ...interface{}) (int64, error)
+	SRem(ctx context.Context, key string, members ...interface{}) (int64, error)
+
+	// ZSet操作
+	ZAdd(ctx context.Context, key string, members ...*Z) (int64, error)
+	ZRem(ctx context.Context, key string, members ...interface{}) (int64, error)
+
+	// 管道控制
 	Exec(ctx context.Context) ([]Cmder, error)
 	Close() error
 }

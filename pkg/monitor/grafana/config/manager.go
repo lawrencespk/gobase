@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"gobase/pkg/config"
 	configTypes "gobase/pkg/config/types"
 	"gobase/pkg/errors"
@@ -28,6 +29,8 @@ func (m *Manager) GetDashboardConfig(name string) (map[string]interface{}, error
 	var dashboardJSON string
 
 	switch name {
+	case "redis":
+		dashboardJSON = m.cfg.Grafana.Dashboards.Redis
 	case "http":
 		dashboardJSON = m.cfg.Grafana.Dashboards.HTTP
 	case "logger":
@@ -37,12 +40,12 @@ func (m *Manager) GetDashboardConfig(name string) (map[string]interface{}, error
 	case "system":
 		dashboardJSON = m.cfg.Grafana.Dashboards.System
 	default:
-		return nil, errors.NewConfigError("unknown dashboard: "+name, nil)
+		return nil, fmt.Errorf("unknown dashboard: %s", name)
 	}
 
 	var dashboard map[string]interface{}
 	if err := json.Unmarshal([]byte(dashboardJSON), &dashboard); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal dashboard config")
+		return nil, fmt.Errorf("failed to parse dashboard JSON: %v", err)
 	}
 
 	return dashboard, nil

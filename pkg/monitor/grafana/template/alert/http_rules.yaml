@@ -1,0 +1,51 @@
+groups:
+  - name: HttpAlerts
+    rules:
+      # 请求错误率告警
+      - alert: HighHttpErrorRate
+        expr: |
+          sum(rate(http_requests_total{job="$job",status=~"5.."}[5m])) 
+          / 
+          sum(rate(http_requests_total{job="$job"}[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HTTP错误率过高"
+          description: "HTTP 5xx错误率超过5%，当前值: {{ $value | printf \"%.2f\" }}%"
+
+      # 请求延迟告警
+      - alert: HighHttpLatency
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(http_request_duration_seconds_bucket{job="$job"}[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP请求延迟过高"
+          description: "HTTP请求P95延迟超过1秒，当前值: {{ $value }}s"
+
+      # 请求量突增告警
+      - alert: HttpTrafficSpike
+        expr: sum(rate(http_requests_total{job="$job"}[5m])) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP请求量突增"
+          description: "HTTP请求速率超过1000/秒，当前值: {{ $value | printf \"%.0f\" }}/s"
+
+      # 4xx错误率告警
+      - alert: HighClientErrorRate
+        expr: |
+          sum(rate(http_requests_total{job="$job",status=~"4.."}[5m]))
+          /
+          sum(rate(http_requests_total{job="$job"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "客户端错误率过高"
+          description: "HTTP 4xx错误率超过10%，当前值: {{ $value | printf \"%.2f\" }}%" 

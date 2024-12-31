@@ -1,0 +1,49 @@
+{
+  "title": "Redis Client Metrics",
+  "panels": [
+    {
+      "title": "Operations Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(redis_client_operations_total[5m])",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "title": "Operation Latency",
+      "type": "graph", 
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(redis_operation_duration_seconds_bucket[5m]))",
+          "legendFormat": "P95 {{operation}}"
+        }
+      ]
+    },
+    {
+      "title": "Connection Pool Stats",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "redis_pool_active_connections",
+          "legendFormat": "Active Connections"
+        },
+        {
+          "expr": "redis_pool_idle_connections", 
+          "legendFormat": "Idle Connections"
+        }
+      ]
+    },
+    {
+      "title": "Errors Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(redis_client_errors_total[5m])",
+          "legendFormat": "{{type}}"
+        }
+      ]
+    }
+  ]
+} 

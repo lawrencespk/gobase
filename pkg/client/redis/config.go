@@ -30,6 +30,7 @@ type Config struct {
 	RouteRandomly bool `yaml:"route_randomly"`
 
 	// 监控配置
-	EnableMetrics bool `yaml:"enable_metrics"`
-	EnableTracing bool `yaml:"enable_tracing"`
+	EnableMetrics    bool   `json:"enable_metrics" yaml:"enable_metrics"`
+	MetricsNamespace string `json:"metrics_namespace" yaml:"metrics_namespace"`
+	EnableTracing    bool   `json:"enable_tracing" yaml:"enable_tracing"`
 }

@@ -357,14 +357,20 @@ func (c *Config) ToTypesConfig() *types.Config {
 		Jaeger: c.Jaeger,
 		Grafana: types.GrafanaConfig{
 			Dashboards: struct {
-				HTTP    string `json:"http" yaml:"http"`
-				Logger  string `json:"logger" yaml:"logger"`
-				Runtime string `json:"runtime" yaml:"runtime"`
-				System  string `json:"system" yaml:"system"`
+				HTTP      string `json:"http" yaml:"http"`
+				Logger    string `json:"logger" yaml:"logger"`
+				Runtime   string `json:"runtime" yaml:"runtime"`
+				System    string `json:"system" yaml:"system"`
+				Redis     string `json:"redis" yaml:"redis"`
+				RateLimit string `json:"rate_limit" yaml:"rate_limit"`
 			}{},
 			Alerts: struct {
-				Rules  string `json:"rules" yaml:"rules"`
-				Logger string `json:"logger" yaml:"logger"`
+				Rules     string `json:"rules" yaml:"rules"`
+				Logger    string `json:"logger" yaml:"logger"`
+				Redis     string `json:"redis" yaml:"redis"`
+				HTTP      string `json:"http" yaml:"http"`
+				Runtime   string `json:"runtime" yaml:"runtime"`
+				RateLimit string `json:"rate_limit" yaml:"rate_limit"`
 			}{},
 		},
 	}

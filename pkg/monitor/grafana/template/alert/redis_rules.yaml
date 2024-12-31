@@ -1,0 +1,42 @@
+groups:
+  - name: RedisAlerts
+    rules:
+      # 高错误率告警
+      - alert: RedisHighErrorRate
+        expr: rate(redis_client_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis错误率过高"
+          description: "Redis客户端每分钟错误数超过10个"
+
+      # 高延迟告警
+      - alert: RedisHighLatency
+        expr: histogram_quantile(0.95, rate(redis_operation_duration_seconds_bucket[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis操作延迟过高"
+          description: "Redis操作P95延迟超过100ms"
+
+      # 连接池耗尽告警
+      - alert: RedisPoolExhausted
+        expr: redis_pool_active_connections / redis_pool_max_connections > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis连接池即将耗尽"
+          description: "Redis连接池使用率超过90%"
+
+      # 连接错误告警
+      - alert: RedisConnectionErrors
+        expr: increase(redis_client_errors_total{type="connection"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis连接错误"
+          description: "检测到Redis连接错误,请检查网络或Redis服务状态" 

@@ -1,0 +1,42 @@
+groups:
+  - name: RuntimeAlerts
+    rules:
+      # Goroutine数量告警
+      - alert: HighGoroutineCount
+        expr: go_goroutines{job="$job"} > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Goroutine数量过高"
+          description: "Goroutine数量超过10000，当前值: {{ $value }}"
+
+      # GC持续时间告警
+      - alert: LongGCDuration
+        expr: rate(go_gc_duration_seconds_sum{job="$job"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GC时间过长"
+          description: "GC平均持续时间超过100ms，当前值: {{ $value }}s"
+
+      # 堆内存使用告警
+      - alert: HighHeapUsage
+        expr: (go_memstats_heap_alloc_bytes{job="$job"} / go_memstats_heap_sys_bytes{job="$job"}) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "堆内存使用率过高"
+          description: "堆内存使用率超过85%，当前值: {{ $value | printf \"%.2f\" }}%"
+
+      # 线程数量告警
+      - alert: HighThreadCount
+        expr: go_threads{job="$job"} > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "线程数量过高"
+          description: "线程数量超过100，当前值: {{ $value }}" 

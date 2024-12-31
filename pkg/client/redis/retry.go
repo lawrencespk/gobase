@@ -7,18 +7,9 @@ import (
 
 	"gobase/pkg/errors"
 	"gobase/pkg/errors/codes"
-	"gobase/pkg/logger/types"
 
 	"github.com/go-redis/redis/v8"
 )
-
-// retryStrategy 重试策略
-type retryStrategy struct {
-	ctx        context.Context
-	logger     types.Logger
-	maxRetries int
-	retryDelay time.Duration
-}
 
 // isRetryableError 判断错误是否可重试
 func isRetryableError(err error) bool {
@@ -41,6 +32,11 @@ func isRetryableError(err error) bool {
 		return true
 	}
 
+	// LOADING 错误是可重试的
+	if strings.Contains(err.Error(), "LOADING") {
+		return true
+	}
+
 	return false
 }
 
@@ -48,27 +44,57 @@ func isRetryableError(err error) bool {
 func withRetry(ctx context.Context, options *Options, op func() error) error {
 	var lastErr error
 	for attempt := 0; attempt <= options.MaxRetries; attempt++ {
-		if err := op(); err != nil {
-			lastErr = err
-			if !isRetryableError(err) {
-				return err
+		// 首先检查上下文是否已取消
+		if err := ctx.Err(); err != nil {
+			if err == context.DeadlineExceeded {
+				return errors.NewError(codes.TimeoutError, "operation timed out", err)
 			}
+			return errors.NewError(codes.CacheError, "operation cancelled", err)
+		}
 
-			// 如果不是最后一次尝试，则等待后重试
-			if attempt < options.MaxRetries {
-				// 使用指数退避策略
-				backoff := time.Duration(attempt*attempt) * 100 * time.Millisecond
-				timer := time.NewTimer(backoff)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return errors.NewError(codes.CacheError, "context cancelled during retry", ctx.Err())
-				case <-timer.C:
-					continue
-				}
-			}
-		} else {
+		// 执行操作
+		err := op()
+		if err == nil {
 			return nil
+		}
+
+		lastErr = err
+
+		// 1. 检查是否已经是包装过的错误
+		if errors.HasErrorCode(err, "") {
+			return err
+		}
+
+		// 2. 检查是否是上下文超时
+		if err == context.DeadlineExceeded || strings.Contains(err.Error(), "context deadline exceeded") {
+			return errors.NewError(codes.TimeoutError, "operation timed out", err)
+		}
+
+		// 3. 检查是否可重试
+		if !isRetryableError(err) {
+			return errors.NewError(codes.CacheError, "operation failed", err)
+		}
+
+		// 4. 如果是最后一次尝试，直接返回错误
+		if attempt == options.MaxRetries {
+			return errors.NewError(codes.CacheError, "max retries exceeded", err)
+		}
+
+		// 5. 计算退避时间
+		backoff := options.RetryBackoff
+		if backoff == 0 {
+			backoff = time.Duration(attempt*attempt) * 100 * time.Millisecond
+		}
+
+		// 6. 等待退避时间，但要考虑上下文超时
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				return errors.NewError(codes.TimeoutError, "operation timed out during retry", ctx.Err())
+			}
+			return errors.NewError(codes.CacheError, "operation cancelled during retry", ctx.Err())
+		case <-time.After(backoff):
+			continue
 		}
 	}
 
@@ -114,31 +140,4 @@ func isClusterDownError(err error) bool {
 
 	// CLUSTERDOWN 错误表示集群不可用
 	return strings.Contains(err.Error(), "CLUSTERDOWN")
-}
-
-// shouldRetry 判断是否应该重试
-func (r *retryStrategy) shouldRetry(err error) bool {
-	if err == nil {
-		return false
-	}
-	// 检查是否是可重试的错误
-	return isRetryableError(err)
-}
-
-// onRetry 重试回调
-func (r *retryStrategy) onRetry(err error) {
-	if err == nil {
-		return
-	}
-	// 记录重试日志
-	r.logger.WithError(err).Warn(r.ctx, "redis operation retry")
-}
-
-// afterRetry 重试后回调
-func (r *retryStrategy) afterRetry(err error) {
-	if err == nil {
-		return
-	}
-	// 记录重试失败日志
-	r.logger.WithError(err).Error(r.ctx, "redis operation retry failed")
 }

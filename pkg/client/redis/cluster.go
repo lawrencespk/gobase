@@ -276,5 +276,38 @@ func (c *clusterClient) ZRem(ctx context.Context, key string, members ...interfa
 	return result, nil
 }
 
+// PoolStats 获取集群连接池统计信息
+func (c *clusterClient) PoolStats() *PoolStats {
+	stats := c.client.PoolStats()
+	return &PoolStats{
+		Hits:       uint32(stats.Hits),
+		Misses:     uint32(stats.Misses),
+		Timeouts:   uint32(stats.Timeouts),
+		TotalConns: uint32(stats.TotalConns),
+		IdleConns:  uint32(stats.IdleConns),
+	}
+}
+
+// Exists 检查键是否存在
+func (c *clusterClient) Exists(ctx context.Context, key string) (bool, error) {
+	span, ctx := startSpan(ctx, c.tracer, "redis.Exists")
+	defer span.Finish()
+
+	result, err := c.client.Exists(ctx, key).Result()
+	if err != nil {
+		c.logger.WithError(err).Error(ctx, "failed to check key existence")
+		return false, errors.NewError(codes.CacheError, "failed to check key existence", err)
+	}
+	return result > 0, nil
+}
+
+// Pool 返回连接池实例
+func (c *clusterClient) Pool() Pool {
+	return &pool{
+		client: c.client,
+		logger: c.logger,
+	}
+}
+
 // 实现所有接口方法...
 // 注意：集群客户端的实现与单机客户端类似，只是底层使用 ClusterClient

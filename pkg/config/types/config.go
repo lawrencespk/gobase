@@ -184,15 +184,21 @@ type JaegerBufferConfig struct {
 
 type GrafanaConfig struct {
 	Dashboards struct {
-		HTTP    string `json:"http" yaml:"http"`       // HTTP仪表盘配置
-		Logger  string `json:"logger" yaml:"logger"`   // 日志仪表盘配置
-		Runtime string `json:"runtime" yaml:"runtime"` // 运行时仪表盘配置
-		System  string `json:"system" yaml:"system"`   // 系统仪表盘配置
+		HTTP      string `json:"http" yaml:"http"`             // HTTP仪表盘配置
+		Logger    string `json:"logger" yaml:"logger"`         // 日志仪表盘配置
+		Runtime   string `json:"runtime" yaml:"runtime"`       // 运行时仪表盘配置
+		System    string `json:"system" yaml:"system"`         // 系统仪表盘配置
+		Redis     string `json:"redis" yaml:"redis"`           // Redis仪表盘配置
+		RateLimit string `json:"rate_limit" yaml:"rate_limit"` // 速率限制仪表盘配置
 	} `json:"dashboards" yaml:"dashboards"`
 
 	Alerts struct {
-		Rules  string `json:"rules" yaml:"rules"`   // 通用告警规则
-		Logger string `json:"logger" yaml:"logger"` // 日志告警规则
+		Rules     string `json:"rules" yaml:"rules"`           // 通用告警规则
+		Logger    string `json:"logger" yaml:"logger"`         // 日志告警规则
+		Redis     string `json:"redis" yaml:"redis"`           // Redis告警规则
+		HTTP      string `json:"http" yaml:"http"`             // HTTP告警规则
+		Runtime   string `json:"runtime" yaml:"runtime"`       // 运行时告警规则
+		RateLimit string `json:"rate_limit" yaml:"rate_limit"` // 速率限制告警规则
 	} `json:"alerts" yaml:"alerts"`
 }
 
