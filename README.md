@@ -40,8 +40,8 @@
 ### 13. Jaeger 链路追踪
 [Jaeger 链路追踪文档](/pkg/trace/jaeger/README.md)
 
-### 14. Redis 缓存
-[Redis 缓存文档](/pkg/cache/redis/README.md)
+### 14. Redis 客户端
+[Redis 客户端文档](/pkg/client/redis/README.md)
 
 ### 15. Metrics 中间件
 [Metrics 中间件文档](/pkg/middleware/metrics/README.md)
