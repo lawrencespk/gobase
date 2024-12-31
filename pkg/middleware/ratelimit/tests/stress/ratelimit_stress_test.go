@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gobase/pkg/cache/redis/client"
+	redisclient "gobase/pkg/client/redis"
 	"gobase/pkg/middleware/ratelimit"
 	"gobase/pkg/middleware/ratelimit/tests/testutils"
 )
@@ -125,7 +125,7 @@ func TestRateLimit_FullStressTest(t *testing.T) {
 }
 
 // runStressTest 执行压力测试的通用函数
-func runStressTest(t *testing.T, redisClient client.Client, tests []struct {
+func runStressTest(t *testing.T, redisClient redisclient.Client, tests []struct {
 	name           string
 	duration       time.Duration
 	concurrency    int

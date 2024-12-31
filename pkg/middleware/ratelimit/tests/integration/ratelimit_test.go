@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,11 +12,56 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	redisstore "gobase/pkg/cache/redis/ratelimit"
+	redisclient "gobase/pkg/client/redis"
+	redistestutils "gobase/pkg/client/redis/tests/testutils"
 	"gobase/pkg/logger"
 	"gobase/pkg/middleware/ratelimit"
-	"gobase/pkg/middleware/ratelimit/tests/testutils"
-	redisLimiter "gobase/pkg/ratelimit/redis"
+	redislimiter "gobase/pkg/ratelimit/redis"
 )
+
+// 存储 Redis 地址的全局变量
+var redisAddr string
+
+func TestMain(m *testing.M) {
+	// 启动 Redis 容器
+	ctx := context.Background()
+	addr, err := redistestutils.StartRedisContainer(ctx)
+	if err != nil {
+		panic(err)
+	}
+	redisAddr = addr // 保存地址供测试使用
+
+	// 运行测试
+	code := m.Run()
+
+	// 清理 Redis 容器
+	if err := redistestutils.CleanupRedisContainers(); err != nil {
+		panic(err)
+	}
+
+	os.Exit(code)
+}
+
+// setupRedisClient 创建一个用于测试的Redis客户端
+func setupRedisClient(t *testing.T) redisclient.Client {
+	require := require.New(t)
+
+	// 使用容器提供的地址
+	client, err := redisclient.NewClient(
+		redisclient.WithAddresses([]string{redisAddr}), // 使用动态分配的地址
+		redisclient.WithDB(0),
+		redisclient.WithPoolSize(10),
+		redisclient.WithMaxRetries(3),
+		redisclient.WithDialTimeout(5*time.Second),
+		redisclient.WithReadTimeout(3*time.Second),
+		redisclient.WithWriteTimeout(3*time.Second),
+	)
+	require.NoError(err, "Failed to create Redis client")
+	require.NotNil(client, "Redis client should not be nil")
+
+	return client
+}
 
 func TestRateLimit_Integration(t *testing.T) {
 	// 初始化日志
@@ -24,23 +70,16 @@ func TestRateLimit_Integration(t *testing.T) {
 	// 设置测试环境
 	gin.SetMode(gin.TestMode)
 
-	// 从环境变量获取Redis配置
-	redisHost := os.Getenv("TEST_REDIS_HOST")
-	if redisHost == "" {
-		redisHost = "localhost"
-	}
-	redisPort := os.Getenv("TEST_REDIS_PORT")
-	if redisPort == "" {
-		redisPort = "6379"
-	}
-
 	// 创建Redis客户端
-	redisClient := testutils.SetupRedisClient(t)
+	redisClient := setupRedisClient(t)
 	require.NotNil(t, redisClient)
 	defer redisClient.Close()
 
+	// 创建 Redis Store
+	store := redisstore.NewStore(redisClient)
+
 	// 创建限流器
-	limiter := redisLimiter.NewSlidingWindowLimiter(redisClient)
+	limiter := redislimiter.NewSlidingWindowLimiter(store)
 
 	// 创建测试路由
 	r := gin.New()
@@ -76,14 +115,17 @@ func TestRateLimit_DistributedScenario(t *testing.T) {
 	_ = logger.InitializeLogger()
 	gin.SetMode(gin.TestMode)
 
-	// 设置Redis
-	redisClient := testutils.SetupRedisClient(t)
+	// 创建Redis客户端
+	redisClient := setupRedisClient(t)
 	require.NotNil(t, redisClient)
 	defer redisClient.Close()
 
+	// 创建 Redis Store
+	store := redisstore.NewStore(redisClient)
+
 	// 创建多个限流器实例，模拟多个服务节点
-	limiter1 := redisLimiter.NewSlidingWindowLimiter(redisClient)
-	limiter2 := redisLimiter.NewSlidingWindowLimiter(redisClient)
+	limiter1 := redislimiter.NewSlidingWindowLimiter(store)
+	limiter2 := redislimiter.NewSlidingWindowLimiter(store)
 
 	// 使用固定的key进行测试
 	const testKey = "test-distributed"

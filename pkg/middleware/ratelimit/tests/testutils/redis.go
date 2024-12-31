@@ -1,60 +1,45 @@
 package testutils
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
-	"gobase/pkg/cache/redis/client"
-	"gobase/pkg/cache/redis/config/types"
+	"gobase/pkg/cache/redis/ratelimit"
+	redis "gobase/pkg/client/redis"
+	redistestutils "gobase/pkg/client/redis/tests/testutils"
 	"gobase/pkg/ratelimit/core"
-	"gobase/pkg/ratelimit/redis"
+	redislimiter "gobase/pkg/ratelimit/redis"
 )
 
-// SetupRedisClient 创建用于测试的Redis客户端
-func SetupRedisClient(t *testing.T) client.Client {
-	cfg := &types.Config{
-		// 基础配置
-		Addresses: []string{"localhost:6379"}, // 使用本地Redis
-		Database:  0,                          // 使用默认数据库
-
-		// 连接池配置
-		PoolSize:     10, // 测试环境使用较小的连接池
-		MinIdleConns: 2,
-		MaxRetries:   3,
-
-		// 超时配置
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
-
-		// 禁用高级特性
-		EnableTLS:     false,
-		EnableCluster: false,
-		EnableMetrics: false,
-		EnableTracing: false,
-	}
+// SetupRedisClient 创建一个用于测试的Redis客户端
+func SetupRedisClient(t *testing.T) redis.Client {
+	// 启动 Redis 容器并获取地址
+	addr, err := redistestutils.StartRedisSingleContainer()
+	require.NoError(t, err, "Failed to start Redis container")
 
 	// 创建Redis客户端
-	redisClient, err := client.NewClient(cfg)
+	client, err := redis.NewClient(
+		redis.WithAddresses([]string{addr}),
+		redis.WithDB(0),
+		redis.WithPoolSize(10),
+		redis.WithMaxRetries(3),
+		redis.WithDialTimeout(5*time.Second),
+		redis.WithReadTimeout(3*time.Second),
+		redis.WithWriteTimeout(3*time.Second),
+	)
 	require.NoError(t, err, "Failed to create Redis client")
+	require.NotNil(t, client, "Redis client should not be nil")
 
-	// 测试连接 - 使用Get方法测试一个不存在的键
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	_, err = redisClient.Get(ctx, "_test_connection_")
-	require.Error(t, err) // 应该返回key不存在的错误,这也说明连接是正常的
-
-	return redisClient
+	return client
 }
 
-// NewRedisLimiter 创建Redis限流器实例
-func NewRedisLimiter(client client.Client) core.Limiter {
-	return redis.NewSlidingWindowLimiter(client,
-		core.WithName("test_limiter"),
-		core.WithAlgorithm("sliding_window"),
-	)
+// NewRedisLimiter 创建一个基于Redis的限流器
+func NewRedisLimiter(client redis.Client) core.Limiter {
+	// 创建 Redis store
+	store := ratelimit.NewStore(client)
+
+	// 创建限流器
+	return redislimiter.NewSlidingWindowLimiter(store)
 }

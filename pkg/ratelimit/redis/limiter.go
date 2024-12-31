@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"gobase/pkg/cache/redis/client"
+	"gobase/pkg/cache/redis/ratelimit"
 	"gobase/pkg/errors"
 	"gobase/pkg/errors/codes"
 	"gobase/pkg/logger"
@@ -43,13 +43,13 @@ var (
 
 // 滑动窗口限流器实现
 type slidingWindowLimiter struct {
-	client client.Client
-	opts   *core.LimiterOptions
-	log    types.Logger
+	store *ratelimit.Store
+	opts  *core.LimiterOptions
+	log   types.Logger
 }
 
 // 创建新的滑动窗口限流器
-func NewSlidingWindowLimiter(client client.Client, opts ...core.LimiterOption) core.Limiter {
+func NewSlidingWindowLimiter(store *ratelimit.Store, opts ...core.LimiterOption) core.Limiter {
 	options := &core.LimiterOptions{
 		Name:      "sliding_window",
 		Algorithm: "sliding_window",
@@ -66,9 +66,9 @@ func NewSlidingWindowLimiter(client client.Client, opts ...core.LimiterOption) c
 	)
 
 	limiter := &slidingWindowLimiter{
-		client: client,
-		opts:   options,
-		log:    defaultLogger,
+		store: store,
+		opts:  options,
+		log:   defaultLogger,
 	}
 
 	// 更新活跃限流器计数
@@ -141,7 +141,7 @@ func (l *slidingWindowLimiter) AllowN(ctx context.Context, key string, n int64, 
     `
 
 	// 执行Redis Lua脚本
-	result, err := l.client.Eval(ctx, script, []string{key, counterKey},
+	result, err := l.store.Eval(ctx, script, []string{key, counterKey},
 		now,                   // 当前时间戳（毫秒）
 		window.Milliseconds(), // 窗口大小（毫秒）
 		limit,                 // 限制数量
@@ -248,7 +248,7 @@ func (l *slidingWindowLimiter) Reset(ctx context.Context, key string) error {
 	counterKey := key + ":counter"
 
 	// 删除主key和计数器key
-	err := l.client.Del(ctx, key, counterKey)
+	err := l.store.Del(ctx, key, counterKey)
 	if err != nil {
 		l.log.Error(ctx, "failed to reset rate limiter",
 			types.Field{Key: "error", Value: err},

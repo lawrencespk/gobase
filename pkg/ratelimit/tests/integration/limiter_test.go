@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gobase/pkg/cache/redis/client"
-	"gobase/pkg/cache/redis/config/types"
+	redisstore "gobase/pkg/cache/redis/ratelimit"
 	"gobase/pkg/cache/redis/tests/testutils"
+	redisclient "gobase/pkg/client/redis"
 	"gobase/pkg/ratelimit/redis"
 )
 
@@ -27,28 +27,23 @@ func TestMain(m *testing.M) {
 }
 
 // setupRedisClient 创建一个用于测试的Redis客户端
-func setupRedisClient(t *testing.T) client.Client {
+func setupRedisClient(t *testing.T) redisclient.Client {
 	require := require.New(t)
 
-	// 创建Redis配置 - 使用本地Docker容器
-	cfg := &types.Config{
-		Addresses:    []string{"localhost:6379"}, // Docker映射的本地端口
-		Username:     "",
-		Password:     "",
-		Database:     0,
-		PoolSize:     10,
-		MaxRetries:   3,
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
-	}
-
-	// 创建Redis客户端
-	redisClient, err := client.NewClient(cfg)
+	// 使用正确的选项函数创建 Redis 客户端
+	client, err := redisclient.NewClient(
+		redisclient.WithAddresses([]string{"localhost:6379"}),
+		redisclient.WithDB(0),
+		redisclient.WithPoolSize(10),
+		redisclient.WithMaxRetries(3),
+		redisclient.WithDialTimeout(5*time.Second),
+		redisclient.WithReadTimeout(3*time.Second),
+		redisclient.WithWriteTimeout(3*time.Second),
+	)
 	require.NoError(err, "Failed to create Redis client")
-	require.NotNil(redisClient, "Redis client should not be nil")
+	require.NotNil(client, "Redis client should not be nil")
 
-	return redisClient
+	return client
 }
 
 func TestSlidingWindowLimiter_Integration(t *testing.T) {
@@ -57,8 +52,11 @@ func TestSlidingWindowLimiter_Integration(t *testing.T) {
 	require.NotNil(t, redisClient)
 	defer redisClient.Close()
 
+	// 创建 Redis Store
+	store := redisstore.NewStore(redisClient)
+
 	// 创建限流器
-	limiter := redis.NewSlidingWindowLimiter(redisClient)
+	limiter := redis.NewSlidingWindowLimiter(store)
 
 	// 测试场景
 	tests := []struct {
@@ -114,8 +112,11 @@ func TestSlidingWindowLimiter_Concurrent(t *testing.T) {
 	require.NotNil(t, redisClient)
 	defer redisClient.Close()
 
+	// 创建 Redis Store
+	store := redisstore.NewStore(redisClient)
+
 	// 创建限流器
-	limiter := redis.NewSlidingWindowLimiter(redisClient)
+	limiter := redis.NewSlidingWindowLimiter(store)
 
 	// 测试参数
 	const (

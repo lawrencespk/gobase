@@ -8,8 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"gobase/pkg/cache/redis/client"
-	"gobase/pkg/ratelimit/redis"
+	"gobase/pkg/cache/redis/ratelimit"
+	"gobase/pkg/client/redis"
+	redislimiter "gobase/pkg/ratelimit/redis"
 )
 
 // MockPipeline 模拟Pipeline接口
@@ -18,15 +19,81 @@ type MockPipeline struct {
 }
 
 // Exec 实现 Pipeline 接口的 Exec 方法
-func (m *MockPipeline) Exec(ctx context.Context) error {
+func (m *MockPipeline) Exec(ctx context.Context) ([]redis.Cmder, error) {
 	args := m.Called(ctx)
-	return args.Error(0)
+	return nil, args.Error(0)
 }
 
 // Discard 实现 Pipeline 接口的 Discard 方法
 func (m *MockPipeline) Discard() error {
 	args := m.Called()
 	return args.Error(0)
+}
+
+// Close 实现 Pipeline 接口的 Close 方法
+func (m *MockPipeline) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+// Del 实现 Del 方法
+func (m *MockPipeline) Del(ctx context.Context, keys ...string) (int64, error) {
+	args := m.Called(ctx, keys)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+// Get 实现 Get 方法
+func (m *MockPipeline) Get(ctx context.Context, key string) (string, error) {
+	args := m.Called(ctx, key)
+	return args.String(0), args.Error(1)
+}
+
+// Set 实现 Set 方法
+func (m *MockPipeline) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+	args := m.Called(ctx, key, value, expiration)
+	return args.Error(0)
+}
+
+// HSet 实现 HSet 方法
+func (m *MockPipeline) HSet(ctx context.Context, key string, values ...interface{}) (int64, error) {
+	args := m.Called(append([]interface{}{ctx, key}, values...)...)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+// HGet 实现 HGet 方法
+func (m *MockPipeline) HGet(ctx context.Context, key, field string) (string, error) {
+	args := m.Called(ctx, key, field)
+	return args.String(0), args.Error(1)
+}
+
+// HDel 实现 HDel 方法
+func (m *MockPipeline) HDel(ctx context.Context, key string, fields ...string) (int64, error) {
+	args := m.Called(append([]interface{}{ctx, key}, fields)...)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+// SAdd 实现 SAdd 方法
+func (m *MockPipeline) SAdd(ctx context.Context, key string, members ...interface{}) (int64, error) {
+	args := m.Called(append([]interface{}{ctx, key}, members...)...)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+// SRem 实现 SRem 方法
+func (m *MockPipeline) SRem(ctx context.Context, key string, members ...interface{}) (int64, error) {
+	args := m.Called(append([]interface{}{ctx, key}, members...)...)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+// ZAdd 实现 ZAdd 方法
+func (m *MockPipeline) ZAdd(ctx context.Context, key string, members ...*redis.Z) (int64, error) {
+	args := m.Called(append([]interface{}{ctx, key}, members)...)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+// ZRem 实现 ZRem 方法
+func (m *MockPipeline) ZRem(ctx context.Context, key string, members ...interface{}) (int64, error) {
+	args := m.Called(append([]interface{}{ctx, key}, members...)...)
+	return args.Get(0).(int64), args.Error(1)
 }
 
 // MockRedisClient 模拟Redis客户端
@@ -46,15 +113,9 @@ func (m *MockRedisClient) Set(ctx context.Context, key string, value interface{}
 	return args.Error(0)
 }
 
-// Incr 实现 Incr 方法
-func (m *MockRedisClient) Incr(ctx context.Context, key string) (int64, error) {
-	args := m.Called(ctx, key)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-// IncrBy 实现 IncrBy 方法
-func (m *MockRedisClient) IncrBy(ctx context.Context, key string, value int64) (int64, error) {
-	args := m.Called(ctx, key, value)
+// Del 实现 Del 方法
+func (m *MockRedisClient) Del(ctx context.Context, keys ...string) (int64, error) {
+	args := m.Called(ctx, keys)
 	return args.Get(0).(int64), args.Error(1)
 }
 
@@ -65,15 +126,21 @@ func (m *MockRedisClient) HGet(ctx context.Context, key, field string) (string, 
 }
 
 // HSet 实现 HSet 方法
-func (m *MockRedisClient) HSet(ctx context.Context, key string, values ...interface{}) error {
+func (m *MockRedisClient) HSet(ctx context.Context, key string, values ...interface{}) (int64, error) {
 	args := m.Called(append([]interface{}{ctx, key}, values...)...)
-	return args.Error(0)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+// HDel 实现 HDel 方法
+func (m *MockRedisClient) HDel(ctx context.Context, key string, fields ...string) (int64, error) {
+	args := m.Called(append([]interface{}{ctx, key}, fields)...)
+	return args.Get(0).(int64), args.Error(1)
 }
 
 // LPush 实现 LPush 方法
-func (m *MockRedisClient) LPush(ctx context.Context, key string, values ...interface{}) error {
+func (m *MockRedisClient) LPush(ctx context.Context, key string, values ...interface{}) (int64, error) {
 	args := m.Called(append([]interface{}{ctx, key}, values...)...)
-	return args.Error(0)
+	return args.Get(0).(int64), args.Error(1)
 }
 
 // LPop 实现 LPop 方法
@@ -83,41 +150,42 @@ func (m *MockRedisClient) LPop(ctx context.Context, key string) (string, error) 
 }
 
 // SAdd 实现 SAdd 方法
-func (m *MockRedisClient) SAdd(ctx context.Context, key string, members ...interface{}) error {
+func (m *MockRedisClient) SAdd(ctx context.Context, key string, members ...interface{}) (int64, error) {
 	args := m.Called(append([]interface{}{ctx, key}, members...)...)
-	return args.Error(0)
+	return args.Get(0).(int64), args.Error(1)
 }
 
 // SRem 实现 SRem 方法
-func (m *MockRedisClient) SRem(ctx context.Context, key string, members ...interface{}) error {
+func (m *MockRedisClient) SRem(ctx context.Context, key string, members ...interface{}) (int64, error) {
 	args := m.Called(append([]interface{}{ctx, key}, members...)...)
-	return args.Error(0)
+	return args.Get(0).(int64), args.Error(1)
 }
 
 // ZAdd 实现 ZAdd 方法
-func (m *MockRedisClient) ZAdd(ctx context.Context, key string, members ...interface{}) error {
-	args := m.Called(append([]interface{}{ctx, key}, members...)...)
-	return args.Error(0)
+func (m *MockRedisClient) ZAdd(ctx context.Context, key string, members ...*redis.Z) (int64, error) {
+	args := m.Called(append([]interface{}{ctx, key}, members)...)
+	return args.Get(0).(int64), args.Error(1)
 }
 
 // ZRem 实现 ZRem 方法
-func (m *MockRedisClient) ZRem(ctx context.Context, key string, members ...interface{}) error {
+func (m *MockRedisClient) ZRem(ctx context.Context, key string, members ...interface{}) (int64, error) {
 	args := m.Called(append([]interface{}{ctx, key}, members...)...)
-	return args.Error(0)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+// TxPipeline 实现 TxPipeline 方法
+func (m *MockRedisClient) TxPipeline() redis.Pipeline {
+	args := m.Called()
+	if p := args.Get(0); p != nil {
+		return p.(redis.Pipeline)
+	}
+	return new(MockPipeline)
 }
 
 // Eval 实现 Eval 方法
 func (m *MockRedisClient) Eval(ctx context.Context, script string, keys []string, args ...interface{}) (interface{}, error) {
-	callArgs := []interface{}{ctx, script, keys}
-	callArgs = append(callArgs, args...)
-	result := m.Called(callArgs...)
-	return result.Get(0), result.Error(1)
-}
-
-// Del 实现 Del 方法
-func (m *MockRedisClient) Del(ctx context.Context, keys ...string) error {
-	args := m.Called(ctx, keys)
-	return args.Error(0)
+	mockArgs := m.Called(append([]interface{}{ctx, script, keys}, args...)...)
+	return mockArgs.Get(0), mockArgs.Error(1)
 }
 
 // Close 实现 Close 方法
@@ -126,21 +194,41 @@ func (m *MockRedisClient) Close() error {
 	return args.Error(0)
 }
 
-// TxPipeline 实现 TxPipeline 方法
-func (m *MockRedisClient) TxPipeline() client.Pipeline {
+func (m *MockRedisClient) Ping(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+func (m *MockRedisClient) PoolStats() *redis.PoolStats {
 	args := m.Called()
-	if p := args.Get(0); p != nil {
-		return p.(client.Pipeline)
+	if stats := args.Get(0); stats != nil {
+		return stats.(*redis.PoolStats)
 	}
-	return new(MockPipeline)
+	return nil
+}
+
+func (m *MockRedisClient) Pool() redis.Pool {
+	args := m.Called()
+	if pool := args.Get(0); pool != nil {
+		return pool.(redis.Pool)
+	}
+	return nil
+}
+
+func (m *MockRedisClient) Exists(ctx context.Context, key string) (bool, error) {
+	args := m.Called(ctx, key)
+	return args.Bool(0), args.Error(1)
 }
 
 func TestSlidingWindowLimiter_Allow(t *testing.T) {
 	// 创建模拟的Redis客户端
 	mockClient := new(MockRedisClient)
 
+	// 使用 Store 包装 mockClient
+	store := ratelimit.NewStore(mockClient)
+
 	// 创建限流器
-	limiter := redis.NewSlidingWindowLimiter(mockClient)
+	limiter := redislimiter.NewSlidingWindowLimiter(store)
 
 	tests := []struct {
 		name      string
@@ -240,8 +328,11 @@ func TestSlidingWindowLimiter_Reset(t *testing.T) {
 	// 创建模拟的Redis客户端
 	mockClient := new(MockRedisClient)
 
+	// 使用 Store 包装 mockClient
+	store := ratelimit.NewStore(mockClient)
+
 	// 创建限流器
-	limiter := redis.NewSlidingWindowLimiter(mockClient)
+	limiter := redislimiter.NewSlidingWindowLimiter(store)
 
 	tests := []struct {
 		name      string
@@ -253,8 +344,8 @@ func TestSlidingWindowLimiter_Reset(t *testing.T) {
 			name: "should reset successfully",
 			key:  "test_key",
 			mockSetup: func() {
-				mockClient.On("Del", mock.Anything, []string{"test_key"}).
-					Return(nil)
+				mockClient.On("Del", mock.Anything, []string{"test_key", "test_key:counter"}).
+					Return(int64(2), nil)
 			},
 			wantErr: false,
 		},
@@ -262,8 +353,8 @@ func TestSlidingWindowLimiter_Reset(t *testing.T) {
 			name: "should handle redis error",
 			key:  "test_key",
 			mockSetup: func() {
-				mockClient.On("Del", mock.Anything, []string{"test_key"}).
-					Return(assert.AnError)
+				mockClient.On("Del", mock.Anything, []string{"test_key", "test_key:counter"}).
+					Return(int64(0), assert.AnError)
 			},
 			wantErr: true,
 		},
