@@ -5,65 +5,19 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/opentracing/opentracing-go"
-	"github.com/prometheus/client_golang/prometheus"
 
 	"gobase/pkg/errors"
 	"gobase/pkg/logger"
 	"gobase/pkg/logger/types"
+	"gobase/pkg/monitor/prometheus/metrics"
+	"gobase/pkg/trace/jaeger"
 )
-
-var (
-	// TokenDuration 令牌操作耗时指标
-	TokenDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name: "jwt_token_duration_seconds",
-			Help: "Duration of JWT token operations in seconds",
-		},
-		[]string{"operation"},
-	)
-
-	// TokenErrors 令牌错误计数
-	TokenErrors = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "jwt_token_errors_total",
-			Help: "Total number of JWT token errors",
-		},
-		[]string{"operation", "error"},
-	)
-
-	// TokenGenerateCounter 令牌生成计数
-	TokenGenerateCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "jwt_token_generate_total",
-			Help: "Total number of JWT token generations",
-		},
-		[]string{"status"},
-	)
-
-	// TokenValidateCounter 令牌验证计数
-	TokenValidateCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "jwt_token_validate_total",
-			Help: "Total number of JWT token validations",
-		},
-		[]string{"status"},
-	)
-)
-
-func init() {
-	// 注册指标
-	prometheus.MustRegister(TokenDuration)
-	prometheus.MustRegister(TokenErrors)
-	prometheus.MustRegister(TokenGenerateCounter)
-	prometheus.MustRegister(TokenValidateCounter)
-}
 
 // TokenManager JWT token管理器
 type TokenManager struct {
 	secretKey []byte
 	logger    types.Logger
-	tracer    opentracing.Tracer
+	provider  *jaeger.Provider
 }
 
 // NewTokenManager 创建新的token管理器
@@ -77,10 +31,16 @@ func NewTokenManager(secretKey string) (*TokenManager, error) {
 		return nil, errors.Wrap(err, "failed to create logger")
 	}
 
+	// 创建 jaeger provider
+	provider, err := jaeger.NewProvider()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create jaeger provider")
+	}
+
 	return &TokenManager{
 		secretKey: []byte(secretKey),
 		logger:    log,
-		tracer:    opentracing.GlobalTracer(),
+		provider:  provider,
 	}, nil
 }
 
@@ -88,25 +48,22 @@ func NewTokenManager(secretKey string) (*TokenManager, error) {
 func (tm *TokenManager) GenerateToken(ctx context.Context, claims Claims) (string, error) {
 	start := time.Now()
 	defer func() {
-		TokenDuration.WithLabelValues("generate").Observe(time.Since(start).Seconds())
+		metrics.DefaultJWTMetrics.TokenDuration.WithLabelValues("generate").Observe(time.Since(start).Seconds())
 	}()
 
 	// 验证claims
 	if err := claims.Validate(); err != nil {
-		TokenErrors.WithLabelValues("generate", err.Error()).Inc()
-		TokenGenerateCounter.WithLabelValues("error").Inc()
+		metrics.DefaultJWTMetrics.TokenErrors.WithLabelValues("generate", err.Error()).Inc()
 		return "", err
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(tm.secretKey)
 	if err != nil {
-		TokenErrors.WithLabelValues("generate", err.Error()).Inc()
-		TokenGenerateCounter.WithLabelValues("error").Inc()
+		metrics.DefaultJWTMetrics.TokenErrors.WithLabelValues("generate", err.Error()).Inc()
 		return "", errors.NewTokenGenerationError("failed to generate token", err)
 	}
 
-	TokenGenerateCounter.WithLabelValues("success").Inc()
 	return tokenString, nil
 }
 
@@ -114,7 +71,7 @@ func (tm *TokenManager) GenerateToken(ctx context.Context, claims Claims) (strin
 func (tm *TokenManager) ValidateToken(ctx context.Context, tokenString string) (*jwt.Token, error) {
 	start := time.Now()
 	defer func() {
-		TokenDuration.WithLabelValues("validate").Observe(time.Since(start).Seconds())
+		metrics.DefaultJWTMetrics.TokenDuration.WithLabelValues("validate").Observe(time.Since(start).Seconds())
 	}()
 
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
@@ -125,12 +82,10 @@ func (tm *TokenManager) ValidateToken(ctx context.Context, tokenString string) (
 	})
 
 	if err != nil {
-		TokenErrors.WithLabelValues("validate", err.Error()).Inc()
-		TokenValidateCounter.WithLabelValues("error").Inc()
+		metrics.DefaultJWTMetrics.TokenErrors.WithLabelValues("validate", err.Error()).Inc()
 		return nil, tm.handleValidationError(err)
 	}
 
-	TokenValidateCounter.WithLabelValues("success").Inc()
 	return token, nil
 }
 
@@ -152,28 +107,28 @@ func (tm *TokenManager) ParseToken(ctx context.Context, tokenString string) (jwt
 
 // handleValidationError 处理token验证错误
 func (tm *TokenManager) handleValidationError(err error) error {
-	// 添加追踪
-	span, ctx := opentracing.StartSpanFromContext(context.Background(), "TokenManager.handleValidationError")
+	// 使用 jaeger.NewSpan 创建新的 span
+	span, err := jaeger.NewSpan("TokenManager.handleValidationError")
+	if err != nil {
+		return errors.Wrap(err, "failed to create span")
+	}
 	defer span.Finish()
 
-	// 添加错误标签
-	span.SetTag("error", true)
-	span.SetTag("error.type", "validation_error")
-
-	// 记录日志
-	tm.logger.WithContext(ctx).WithFields(
-		types.Field{Key: "error", Value: err},
-	).Error(ctx, "token validation failed")
+	// 记录错误日志
+	tm.logger.WithError(err).Error(span.Context(), "token validation failed")
 
 	switch {
 	case errors.Is(err, jwt.ErrTokenExpired):
 		span.SetTag("error.reason", "token_expired")
+		metrics.DefaultJWTMetrics.TokenErrors.WithLabelValues("validate", "expired").Inc()
 		return errors.NewTokenExpiredError("token has expired", err)
 	case errors.Is(err, jwt.ErrSignatureInvalid):
 		span.SetTag("error.reason", "invalid_signature")
+		metrics.DefaultJWTMetrics.TokenErrors.WithLabelValues("validate", "invalid_signature").Inc()
 		return errors.NewSignatureInvalidError("invalid token signature", err)
 	default:
 		span.SetTag("error.reason", "validation_failed")
+		metrics.DefaultJWTMetrics.TokenErrors.WithLabelValues("validate", "validation_failed").Inc()
 		return errors.NewTokenInvalidError("token validation failed", err)
 	}
 }

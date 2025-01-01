@@ -11,6 +11,12 @@ type JWTMetrics struct {
 
 	// TokenReuseIntervalGauge Token重用间隔指标
 	TokenReuseIntervalGauge *metric.Gauge
+
+	// TokenDuration Token操作耗时指标
+	TokenDuration *metric.Histogram
+
+	// TokenErrors Token错误计数
+	TokenErrors *metric.Counter
 }
 
 var (
@@ -38,6 +44,20 @@ func NewJWTMetrics() *JWTMetrics {
 			Name:      "token_reuse_interval_seconds",
 			Help:      "The reuse interval of JWT tokens in seconds",
 		}),
+
+		TokenDuration: metric.NewHistogram(metric.HistogramOpts{
+			Namespace: "gobase",
+			Subsystem: "jwt",
+			Name:      "token_duration_seconds",
+			Help:      "Duration of JWT token operations in seconds",
+		}).WithLabels("operation"),
+
+		TokenErrors: metric.NewCounter(metric.CounterOpts{
+			Namespace: "gobase",
+			Subsystem: "jwt",
+			Name:      "token_errors_total",
+			Help:      "Total number of JWT token errors",
+		}).WithLabels("operation", "error"),
 	}
 
 	// 注册指标
@@ -48,6 +68,18 @@ func NewJWTMetrics() *JWTMetrics {
 	}
 
 	if err := m.TokenReuseIntervalGauge.Register(); err != nil {
+		if err.Error() != "duplicate metrics collector registration attempted" {
+			panic(err)
+		}
+	}
+
+	if err := m.TokenDuration.Register(); err != nil {
+		if err.Error() != "duplicate metrics collector registration attempted" {
+			panic(err)
+		}
+	}
+
+	if err := m.TokenErrors.Register(); err != nil {
 		if err.Error() != "duplicate metrics collector registration attempted" {
 			panic(err)
 		}
