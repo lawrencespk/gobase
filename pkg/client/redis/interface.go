@@ -47,6 +47,12 @@ type Client interface {
 
 	// 连接池管理
 	Pool() Pool
+
+	// Publish 发布消息到指定的频道
+	Publish(ctx context.Context, channel string, message interface{}) error
+
+	// Publish/Subscribe 操作
+	Subscribe(ctx context.Context, channels ...string) PubSub
 }
 
 // Cache Redis缓存接口
@@ -95,4 +101,19 @@ type Pipeline interface {
 	// 管道控制
 	Exec(ctx context.Context) ([]Cmder, error)
 	Close() error
+}
+
+// PubSub 发布订阅接口
+type PubSub interface {
+	// 接收消息
+	ReceiveMessage(ctx context.Context) (*Message, error)
+	// 关闭订阅
+	Close() error
+}
+
+// Message 消息结构
+type Message struct {
+	Channel string
+	Pattern string
+	Payload string
 }

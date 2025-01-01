@@ -60,21 +60,6 @@ func NewRequestTimeoutError(message string, cause error) error {
 	return NewError(codes.RequestTimeout, message, cause)
 }
 
-// NewInvalidTokenError 创建无效令牌错误
-func NewInvalidTokenError(message string, cause error) error {
-	return NewError(codes.InvalidToken, message, cause)
-}
-
-// NewTokenExpiredError 创建令牌过期错误
-func NewTokenExpiredError(message string, cause error) error {
-	return NewError(codes.TokenExpired, message, cause)
-}
-
-// NewInvalidSignatureError 创建无效签名错误
-func NewInvalidSignatureError(message string, cause error) error {
-	return NewError(codes.InvalidSignature, message, cause)
-}
-
 // 用户相关错误 (2100-2199)
 func NewUserNotFoundError(message string, cause error) error {
 	return NewError(codes.UserNotFound, message, cause)

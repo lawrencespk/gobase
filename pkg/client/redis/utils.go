@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	"gobase/pkg/errors"
-	"gobase/pkg/errors/codes"
+
+	"github.com/go-redis/redis/v8"
 )
 
 // withOperation 统一的操作包装函数
@@ -25,12 +26,46 @@ func (c *client) withOperation(ctx context.Context, operation string, fn func() 
 
 	err := withMetrics(ctx, operation, c.options.Registry, fn)
 	if err != nil {
-		// 统一处理上下文超时错误
-		if err == context.DeadlineExceeded {
-			return errors.NewError(codes.TimeoutError, "operation timed out", err)
+		// 1. 如果是上下文超时，返回超时错误
+		if err == context.DeadlineExceeded ||
+			strings.Contains(err.Error(), "context deadline exceeded") {
+			return errors.NewTimeoutError("operation timed out", err)
 		}
-		if strings.Contains(err.Error(), "context deadline exceeded") {
-			return errors.NewError(codes.TimeoutError, "operation timed out", err)
+
+		// 2. 如果已经是包装过的错误，直接返回
+		if errors.HasErrorCode(err, "") {
+			return err
+		}
+
+		// 3. 处理特定的 Redis 错误
+		if strings.Contains(err.Error(), "NOAUTH") || strings.Contains(err.Error(), "AUTH") {
+			return errors.NewRedisAuthError("authentication failed", err)
+		}
+
+		// 处理连接池错误
+		if strings.Contains(err.Error(), "pool exhausted") {
+			return errors.NewRedisPoolExhaustedError("connection pool exhausted", err)
+		}
+
+		// 处理连接错误
+		if strings.Contains(err.Error(), "connection refused") ||
+			strings.Contains(err.Error(), "network is down") {
+			return errors.NewRedisConnError("connection failed", err)
+		}
+
+		// 处理只读错误
+		if isReadOnlyError(err) {
+			return errors.NewRedisReadOnlyError("redis instance is read-only", err)
+		}
+
+		// 处理集群错误
+		if isClusterDownError(err) {
+			return errors.NewRedisClusterError("cluster is down", err)
+		}
+
+		// 处理加载错误
+		if isLoadingError(err) {
+			return errors.NewRedisLoadingError("redis is loading the dataset in memory", err)
 		}
 	}
 	return err
@@ -42,8 +77,14 @@ func (c *client) withOperationResult(ctx context.Context, operation string, fn f
 	err := c.withOperation(ctx, operation, func() error {
 		var err error
 		result, err = fn()
-		return err
+		if err != nil {
+			// 处理键不存在的情况
+			if err == redis.Nil {
+				return errors.NewRedisKeyNotFoundError("key not found", err)
+			}
+			return err
+		}
+		return nil
 	})
-	// withOperation 已经处理了超时错误，这里直接返回
 	return result, err
 }

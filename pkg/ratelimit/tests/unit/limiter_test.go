@@ -220,6 +220,21 @@ func (m *MockRedisClient) Exists(ctx context.Context, key string) (bool, error) 
 	return args.Bool(0), args.Error(1)
 }
 
+// Publish 实现 Publish 方法
+func (m *MockRedisClient) Publish(ctx context.Context, channel string, message interface{}) error {
+	args := m.Called(ctx, channel, message)
+	return args.Error(0)
+}
+
+// Subscribe 实现 Subscribe 方法
+func (m *MockRedisClient) Subscribe(ctx context.Context, channels ...string) redis.PubSub {
+	args := m.Called(append([]interface{}{ctx}, channels)...)
+	if ps := args.Get(0); ps != nil {
+		return ps.(redis.PubSub)
+	}
+	return nil
+}
+
 func TestSlidingWindowLimiter_Allow(t *testing.T) {
 	// 创建模拟的Redis客户端
 	mockClient := new(MockRedisClient)

@@ -77,7 +77,7 @@ func GetErrorStack(err error) []string {
 func HasErrorCode(err error, code string) bool {
 	chain := GetErrorChain(err)
 	for _, e := range chain {
-		if e.Code() == code {
+		if checkErrorCodeMapping(e.Code(), code) {
 			return true
 		}
 	}

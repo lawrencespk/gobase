@@ -49,9 +49,6 @@ const (
 	DataConflict       = "2008" // 数据冲突
 	ServiceUnavailable = "2009" // 服务不可用
 	RequestTimeout     = "2010" // 请求超时
-	InvalidToken       = "2011" // 无效令牌
-	TokenExpired       = "2012" // 令牌过期
-	InvalidSignature   = "2013" // 无效签名
 
 	// 用户相关错误码 (2100-2199)
 	UserNotFound      = "2100" // 用户不存在
@@ -61,6 +58,37 @@ const (
 	PasswordExpired   = "2104" // 密码过期
 	InvalidUsername   = "2105" // 用户名无效
 	DuplicateUsername = "2106" // 用户名重复
+
+	// Token相关错误码 (2120-2139)
+	TokenInvalid         = "2120" // Token无效
+	TokenExpired         = "2121" // Token过期
+	TokenRevoked         = "2122" // Token已被吊销
+	TokenNotFound        = "2123" // Token不存在
+	TokenTypeMismatch    = "2124" // Token类型不匹配
+	TokenGenerationError = "2125" // Token生成错误
+
+	// Claims相关错误码 (2140-2149)
+	ClaimsMissing = "2140" // Claims缺失必要字段
+	ClaimsInvalid = "2141" // Claims无效
+	ClaimsExpired = "2142" // Claims过期
+
+	// JWT安全相关错误码 (2150-2159)
+	SignatureInvalid  = "2150" // 签名无效
+	KeyInvalid        = "2151" // 密钥无效
+	AlgorithmMismatch = "2152" // 算法不匹配
+
+	// 绑定相关错误码 (2160-2169)
+	BindingInvalid  = "2160" // 绑定信息无效
+	BindingMismatch = "2161" // 绑定信息不匹配
+
+	// 会话相关错误码 (2170-2179)
+	SessionInvalid  = "2170" // 会话无效
+	SessionExpired  = "2171" // 会话过期
+	SessionNotFound = "2172" // 会话不存在
+
+	// 安全策略相关错误码 (2180-2189)
+	PolicyViolation = "2180" // 违反安全策略
+	RotationFailed  = "2181" // 密钥轮换失败
 
 	// 权限相关错误码 (2200-2299)
 	NoPermission     = "2200" // 无权限
@@ -133,6 +161,7 @@ const (
 	ConfigCloseError       = "2909" // 配置关闭错误
 	ConfigKeyNotFoundError = "2910" // 配置键不存在错误
 	ConfigNotLoadedError   = "2911" // 配置未加载错误
+	ConfigErrRequired      = "2912" // 必需的配置项缺失
 
 	// Nacos错误码 (3000-3099)
 	NacosConnectError   = "3000" // Nacos连接错误
@@ -169,4 +198,30 @@ const (
 	JaegerShutdownError  = "3207" // Jaeger关闭错误
 	JaegerReporterError  = "3208" // Jaeger上报错误
 	JaegerPropagateError = "3209" // Jaeger传播错误
+
+	// Redis相关错误码 (3300-3399)
+	RedisConnError          = "3300" // Redis连接错误
+	RedisAuthError          = "3301" // Redis认证错误
+	RedisTimeoutError       = "3302" // Redis超时错误
+	RedisClusterError       = "3303" // Redis集群错误
+	RedisReadOnlyError      = "3304" // Redis只读错误
+	RedisKeyNotFoundError   = "3305" // Redis键不存在错误
+	RedisKeyExpiredError    = "3306" // Redis键已过期错误
+	RedisCommandError       = "3307" // Redis命令执行错误
+	RedisPipelineError      = "3308" // Redis管道操作错误
+	RedisPoolExhaustedError = "3309" // Redis连接池耗尽错误
+	RedisReplicationError   = "3310" // Redis复制错误
+	RedisScriptError        = "3311" // Redis脚本执行错误
+	RedisWatchError         = "3312" // Redis监视错误
+	RedisLockError          = "3313" // Redis锁操作错误
+	RedisMaxMemoryError     = "3314" // Redis内存超限错误
+	RedisLoadingError       = "3315" // Redis加载数据错误
+	RedisInvalidConfigError = "3316" // Redis配置无效错误
+
+	// Store相关错误码 (3400-3499)
+	StoreErrCreate   = "3400" // 存储创建错误
+	StoreErrSet      = "3401" // 存储设置错误
+	StoreErrGet      = "3402" // 存储获取错误
+	StoreErrDelete   = "3403" // 存储删除错误
+	StoreErrNotFound = "3404" // 存储数据不存在
 )

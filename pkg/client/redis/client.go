@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 
 	"gobase/pkg/errors"
-	"gobase/pkg/errors/codes"
 	"gobase/pkg/logger/types"
 
 	"github.com/go-redis/redis/v8"
@@ -32,12 +31,12 @@ func NewClient(opts ...Option) (Client, error) {
 
 	// 基本验证
 	if len(options.Addresses) == 0 {
-		return nil, errors.NewError(codes.CacheError, "redis address is required", nil)
+		return nil, errors.NewRedisInvalidConfigError("redis address is required", nil)
 	}
 
 	// 验证数据库编号
 	if options.DB < 0 {
-		return nil, errors.NewError(codes.InvalidParams, "invalid database number", nil)
+		return nil, errors.NewInvalidParamsError("invalid database number", nil)
 	}
 
 	var rdb redis.UniversalClient
@@ -66,7 +65,7 @@ func NewClient(opts ...Option) (Client, error) {
 			if options.TLSCertFile != "" && options.TLSKeyFile != "" {
 				cert, err := tls.LoadX509KeyPair(options.TLSCertFile, options.TLSKeyFile)
 				if err != nil {
-					return nil, errors.NewError(codes.CacheError, "failed to load TLS certificate", err)
+					return nil, errors.NewRedisInvalidConfigError("failed to load TLS certificate", err)
 				}
 				tlsConfig.Certificates = []tls.Certificate{cert}
 			}
@@ -100,7 +99,7 @@ func NewClient(opts ...Option) (Client, error) {
 			if options.TLSCertFile != "" && options.TLSKeyFile != "" {
 				cert, err := tls.LoadX509KeyPair(options.TLSCertFile, options.TLSKeyFile)
 				if err != nil {
-					return nil, errors.NewError(codes.CacheError, "failed to load TLS certificate", err)
+					return nil, errors.NewRedisInvalidConfigError("failed to load TLS certificate", err)
 				}
 				tlsConfig.Certificates = []tls.Certificate{cert}
 			}
@@ -119,7 +118,7 @@ func NewClient(opts ...Option) (Client, error) {
 		})
 		if err != nil {
 			options.Logger.WithError(err).Error(ctx, "failed to connect to redis")
-			return nil, errors.NewError(codes.CacheError, "failed to connect to redis", err)
+			return nil, errors.NewRedisConnError("failed to connect to redis", err)
 		}
 	}
 
@@ -134,7 +133,7 @@ func NewClient(opts ...Option) (Client, error) {
 // NewClientFromConfig 从配置创建Redis客户端
 func NewClientFromConfig(cfg *Config) (Client, error) {
 	if cfg == nil {
-		return nil, errors.NewError(codes.CacheError, "config is required", nil)
+		return nil, errors.NewRedisInvalidConfigError("config is required", nil)
 	}
 
 	// 将 Config 转换为 Options

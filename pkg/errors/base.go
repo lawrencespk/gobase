@@ -5,8 +5,53 @@ import (
 	"runtime"
 	"strings"
 
+	"gobase/pkg/errors/codes"
 	"gobase/pkg/errors/types"
 )
+
+// 错误码映射关系
+var errorCodeMappings = map[string][]string{
+	codes.CacheError: {
+		codes.RedisConnError,
+		codes.RedisAuthError,
+		codes.RedisTimeoutError,
+		codes.RedisClusterError,
+		codes.RedisReadOnlyError,
+		codes.RedisCommandError,
+		codes.RedisPipelineError,
+		codes.RedisPoolExhaustedError,
+		codes.RedisReplicationError,
+		codes.RedisScriptError,
+		codes.RedisWatchError,
+		codes.RedisLockError,
+		codes.RedisMaxMemoryError,
+		codes.RedisLoadingError,
+		codes.RedisInvalidConfigError,
+	},
+	codes.NotFound: {
+		codes.RedisKeyNotFoundError,
+		codes.RedisKeyExpiredError,
+	},
+}
+
+// checkErrorCodeMapping 检查错误码是否匹配或在映射关系中
+func checkErrorCodeMapping(errorCode, targetCode string) bool {
+	// 直接匹配
+	if errorCode == targetCode {
+		return true
+	}
+
+	// 检查映射关系
+	if mappedCodes, exists := errorCodeMappings[targetCode]; exists {
+		for _, mappedCode := range mappedCodes {
+			if errorCode == mappedCode {
+				return true
+			}
+		}
+	}
+
+	return false
+}
 
 // baseError 基础错误类型
 type baseError struct {

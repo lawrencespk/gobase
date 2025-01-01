@@ -373,6 +373,12 @@ HandleError(c, NewSystemError("系统内部错误", err))
 return
 }
 ```
+### 9 JWT 错误
+```go
+// 创建JWT错误
+err := NewJWTError("JWT处理失败", cause)
+```
+
 ## 附录：错误码列表
 
 ### 系统错误 (1000-1099)

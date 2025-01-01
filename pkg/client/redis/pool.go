@@ -2,10 +2,10 @@ package redis
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"gobase/pkg/errors"
-	"gobase/pkg/errors/codes"
 	"gobase/pkg/logger/types"
 
 	"github.com/go-redis/redis/v8"
@@ -41,6 +41,10 @@ type pool struct {
 
 // NewPool 创建连接池
 func NewPool(client *redis.Client, logger types.Logger) Pool {
+	if client == nil {
+		logger.Error(context.Background(), "redis client is nil")
+		return nil
+	}
 	return &pool{
 		client: client,
 		logger: logger,
@@ -88,6 +92,10 @@ func (c *client) PoolStats() *PoolStats {
 
 // Pool 返回连接池实例
 func (c *client) Pool() Pool {
+	if c.client == nil {
+		c.logger.Error(context.Background(), "redis client is nil")
+		return nil
+	}
 	return &pool{
 		client: c.client,
 		logger: c.logger,
@@ -107,16 +115,33 @@ func (p *pool) Close() error {
 		err = c.Close()
 	default:
 		p.logger.Error(ctx, "unknown redis client type")
-		return errors.NewError(codes.CacheError, "unknown redis client type", nil)
+		return errors.NewRedisInvalidConfigError("unknown redis client type", nil)
 	}
 
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return errors.NewRedisTimeoutError("connection pool close timeout", err)
+		}
+
+		if isPoolExhaustedError(err) {
+			return errors.NewRedisPoolExhaustedError("connection pool exhausted", err)
+		}
+
 		p.logger.WithError(err).WithFields(types.Field{
 			Key:   "timeout",
 			Value: "5s",
 		}).Error(ctx, "failed to close redis connection pool")
-		return errors.NewError(codes.CacheError, "failed to close redis connection pool", err)
+		return errors.NewRedisConnError("failed to close redis connection pool", err)
 	}
 
 	return nil
+}
+
+// isPoolExhaustedError 检查是否是连接池耗尽错误
+func isPoolExhaustedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "pool exhausted") ||
+		strings.Contains(err.Error(), "connection pool")
 }

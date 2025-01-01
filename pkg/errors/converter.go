@@ -11,20 +11,17 @@ import (
 // HTTPStatusMapping 定义错误码到 HTTP 状态码的映射
 var HTTPStatusMapping = map[string]int{
 	// 4xx - 客户端错误
-	codes.InvalidParams:    http.StatusBadRequest,            // 400 无效参数
-	codes.Unauthorized:     http.StatusUnauthorized,          // 401 未授权
-	codes.Forbidden:        http.StatusForbidden,             // 403 禁止访问
-	codes.NotFound:         http.StatusNotFound,              // 404 资源不存在
-	codes.AlreadyExists:    http.StatusConflict,              // 409 资源已存在
-	codes.InvalidToken:     http.StatusUnauthorized,          // 401 无效的令牌
-	codes.TokenExpired:     http.StatusUnauthorized,          // 401 令牌过期
-	codes.TooManyRequests:  http.StatusTooManyRequests,       // 429 请求过多
-	codes.BadRequest:       http.StatusBadRequest,            // 400 错误的请求
-	codes.InvalidSignature: http.StatusBadRequest,            // 400 无效的签名
-	codes.DataConflict:     http.StatusConflict,              // 409 数据冲突
-	codes.RequestTimeout:   http.StatusRequestTimeout,        // 408 请求超时
-	codes.InvalidFileType:  http.StatusBadRequest,            // 400 无效的文件类型
-	codes.FileTooLarge:     http.StatusRequestEntityTooLarge, // 413 文件过大
+	codes.InvalidParams:   http.StatusBadRequest,            // 400 无效参数
+	codes.Unauthorized:    http.StatusUnauthorized,          // 401 未授权
+	codes.Forbidden:       http.StatusForbidden,             // 403 禁止访问
+	codes.NotFound:        http.StatusNotFound,              // 404 资源不存在
+	codes.AlreadyExists:   http.StatusConflict,              // 409 资源已存在
+	codes.TooManyRequests: http.StatusTooManyRequests,       // 429 请求过多
+	codes.BadRequest:      http.StatusBadRequest,            // 400 错误的请求
+	codes.DataConflict:    http.StatusConflict,              // 409 数据冲突
+	codes.RequestTimeout:  http.StatusRequestTimeout,        // 408 请求超时
+	codes.InvalidFileType: http.StatusBadRequest,            // 400 无效的文件类型
+	codes.FileTooLarge:    http.StatusRequestEntityTooLarge, // 413 文件过大
 
 	// 5xx - 服务器错误
 	codes.SystemError:        http.StatusInternalServerError, // 500 系统错误
@@ -34,6 +31,31 @@ var HTTPStatusMapping = map[string]int{
 	codes.NetworkError:       http.StatusBadGateway,          // 502 网络错误
 	codes.TimeoutError:       http.StatusGatewayTimeout,      // 504 超时错误
 	codes.ThirdPartyError:    http.StatusBadGateway,          // 502 第三方服务错误
+
+	// JWT相关错误码映射
+	codes.TokenInvalid:      http.StatusUnauthorized, // 401 Token无效
+	codes.TokenExpired:      http.StatusUnauthorized, // 401 Token过期
+	codes.TokenRevoked:      http.StatusUnauthorized, // 401 Token已被吊销
+	codes.TokenNotFound:     http.StatusUnauthorized, // 401 Token不存在
+	codes.TokenTypeMismatch: http.StatusUnauthorized, // 401 Token类型不匹配
+
+	codes.ClaimsMissing: http.StatusBadRequest,   // 400 Claims缺失
+	codes.ClaimsInvalid: http.StatusBadRequest,   // 400 Claims无效
+	codes.ClaimsExpired: http.StatusUnauthorized, // 401 Claims过期
+
+	codes.SignatureInvalid:  http.StatusUnauthorized,        // 401 签名无效
+	codes.KeyInvalid:        http.StatusInternalServerError, // 500 密钥无效
+	codes.AlgorithmMismatch: http.StatusBadRequest,          // 400 算法不匹配
+
+	codes.BindingInvalid:  http.StatusBadRequest,   // 400 绑定信息无效
+	codes.BindingMismatch: http.StatusUnauthorized, // 401 绑定信息不匹配
+
+	codes.SessionInvalid:  http.StatusUnauthorized, // 401 会话无效
+	codes.SessionExpired:  http.StatusUnauthorized, // 401 会话过期
+	codes.SessionNotFound: http.StatusUnauthorized, // 401 会话不存在
+
+	codes.PolicyViolation: http.StatusForbidden,           // 403 违反安全策略
+	codes.RotationFailed:  http.StatusInternalServerError, // 500 密钥轮换失败
 }
 
 // ErrorResponse 定义统一的错误响应结构
