@@ -58,14 +58,14 @@ func (c *Cache) Get(ctx context.Context, key string) (interface{}, error) {
 	value, ok := c.data.Load(key)
 	if !ok {
 		c.metrics.WithLabels("get", "miss").Inc()
-		return nil, errors.NewCacheMissError("cache miss", nil)
+		return nil, errors.NewRedisKeyNotFoundError("cache miss", nil)
 	}
 
 	item := value.(*cacheItem)
 	if item.isExpired() {
 		c.data.Delete(key)
 		c.metrics.WithLabels("get", "expired").Inc()
-		return nil, errors.NewCacheMissError("cache expired", nil)
+		return nil, errors.NewRedisKeyNotFoundError("cache expired", nil)
 	}
 
 	c.metrics.WithLabels("get", "hit").Inc()

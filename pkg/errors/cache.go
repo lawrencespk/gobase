@@ -20,3 +20,8 @@ func NewCacheExpiredError(message string, cause error) error {
 func NewCacheFullError(message string, cause error) error {
 	return NewError(codes.CacheFullError, message, cause)
 }
+
+// NewCacheNotFoundError 创建缓存层级不存在错误
+func NewCacheNotFoundError(message string, cause error) error {
+	return NewError(codes.CacheNotFoundError, message, cause)
+}

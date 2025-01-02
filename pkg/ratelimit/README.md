@@ -120,9 +120,27 @@ if err := limiter.Wait(ctx, key, limit, window); err != nil {
 }
 ```
 
-## 6. 性能优化
+## 6. 性能测试
 
-### 6.1 Redis优化
+最新的基准测试结果显示([查看完整测试报告](../cache/redis/ratelimit/tests/benchmark/README.md)):
+
+| 操作类型 | 操作延迟 (ns/op) | 内存分配 (B/op) | 分配次数 (allocs/op) | 并发度 |
+|---------|----------------|----------------|-------------------|--------|
+| Eval    | 618,258       | 486           | 13               | 32     |
+| Del     | 733,306       | 413           | 13               | 32     |
+| Parallel| 59,888        | 542           | 17               | 32     |
+
+### 性能特点
+
+- 并发性能优秀，Parallel 测试比单线程快约 10 倍
+- 内存分配稳定，各测试间差异不大
+- 延迟在可接受范围内
+- 基本操作的内存分配保持在 400-550 字节范围内
+- 分配次数保持稳定，在 13-17 次之间
+
+## 7. 性能优化
+
+### 7.1 Redis优化
 
 ```go
 redisConfig := &core.RedisConfig{
@@ -134,7 +152,7 @@ redisConfig := &core.RedisConfig{
 }
 ```
 
-### 6.2 本地缓存
+### 7.2 本地缓存
 
 建议在高并发场景下使用本地缓存来减少 Redis 访问：
 
@@ -147,9 +165,9 @@ cache := memory.NewCache(
 )
 ```
 
-## 7. 测试
+## 8. 测试
 
-### 7.1 单元测试
+### 8.1 单元测试
 
 ```go
 func TestSlidingWindowLimiter_Allow(t *testing.T) {
@@ -162,7 +180,7 @@ func TestSlidingWindowLimiter_Allow(t *testing.T) {
 }
 ```
 
-### 7.2 集成测试
+### 8.2 集成测试
 
 ```go
 func TestSlidingWindowLimiter_Integration(t *testing.T) {
@@ -190,7 +208,7 @@ func TestSlidingWindowLimiter_Integration(t *testing.T) {
 }
 ```
 
-## 8. 最佳实践
+## 9. 最佳实践
 
 1. 选择合适的限流算法
    - 一般场景：滑动窗口

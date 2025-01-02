@@ -78,8 +78,3 @@ func NewResourceExhaustedError(message string, cause error) error {
 func NewInitializationError(message string, cause error) error {
 	return NewError(codes.InitializeError, message, cause)
 }
-
-// NewCacheNotFoundError 创建缓存未找到错误
-func NewCacheNotFoundError(message string, cause error) error {
-	return NewError(codes.CacheMissError, message, cause)
-}

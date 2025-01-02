@@ -10,6 +10,7 @@ import (
 	"gobase/pkg/cache/redis"
 	redisClient "gobase/pkg/client/redis"
 	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 	"gobase/pkg/logger/types"
 	"gobase/pkg/monitor/prometheus/metric"
 	"gobase/pkg/trace/jaeger"
@@ -80,6 +81,11 @@ func (m *Manager) Get(ctx context.Context, key string) (interface{}, error) {
 	value, err = m.GetFromLevel(ctx, key, cache.L2Cache)
 	if err != nil {
 		m.metrics.WithLabels("get", "l2", "miss").Inc()
+		// 确保返回 RedisKeyNotFoundError
+		if errors.HasErrorCode(err, codes.CacheMissError) ||
+			errors.HasErrorCode(err, codes.CacheExpiredError) {
+			return nil, errors.NewRedisKeyNotFoundError("cache not found", err)
+		}
 		return nil, err
 	}
 
@@ -100,19 +106,40 @@ func (m *Manager) Set(ctx context.Context, key string, value interface{}, expira
 		defer span.Finish()
 	}
 
-	// 写入L2缓存
-	if err := m.SetToLevel(ctx, key, value, expiration, cache.L2Cache); err != nil {
-		m.metrics.WithLabels("set", "l2", "error").Inc()
-		return err
-	}
+	// 使用对象池
+	k := keyPool.Get().(*string)
+	*k = key
+	defer keyPool.Put(k)
 
-	// 写入L1缓存
-	if err := m.SetToLevel(ctx, key, value, m.config.L1TTL, cache.L1Cache); err != nil {
+	v := valuePool.Get().(*interface{})
+	*v = value
+	defer valuePool.Put(v)
+
+	// 并发写入 L1 和 L2
+	var wg sync.WaitGroup
+	var l1Err, l2Err error
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		l1Err = m.SetToLevel(ctx, *k, *v, m.config.L1TTL, cache.L1Cache)
+	}()
+
+	go func() {
+		defer wg.Done()
+		l2Err = m.SetToLevel(ctx, *k, *v, expiration, cache.L2Cache)
+	}()
+
+	wg.Wait()
+
+	// 处理错误
+	if l1Err != nil {
 		m.logger.Warn(ctx, "failed to set L1 cache",
-			types.Field{Key: "error", Value: err})
+			types.Field{Key: "error", Value: l1Err})
 	}
-
-	m.metrics.WithLabels("set", "all", "success").Inc()
+	if l2Err != nil {
+		return l2Err
+	}
 	return nil
 }
 
@@ -321,3 +348,17 @@ func (m *Manager) getLevelString(level cache.Level) string {
 		return "unknown"
 	}
 }
+
+// 添加对象池以减少内存分配
+var (
+	keyPool = sync.Pool{
+		New: func() interface{} {
+			return new(string)
+		},
+	}
+	valuePool = sync.Pool{
+		New: func() interface{} {
+			return new(interface{})
+		},
+	}
+)
