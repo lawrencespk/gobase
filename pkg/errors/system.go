@@ -73,3 +73,13 @@ func NewDiskError(message string, cause error) error {
 func NewResourceExhaustedError(message string, cause error) error {
 	return NewError(codes.ResourceExhausted, message, cause)
 }
+
+// NewInitializationError 创建初始化错误
+func NewInitializationError(message string, cause error) error {
+	return NewError(codes.InitializeError, message, cause)
+}
+
+// NewCacheNotFoundError 创建缓存未找到错误
+func NewCacheNotFoundError(message string, cause error) error {
+	return NewError(codes.CacheMissError, message, cause)
+}

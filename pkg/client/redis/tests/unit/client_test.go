@@ -134,6 +134,12 @@ func TestClientOperations(t *testing.T) {
 }
 
 func TestNewClientFromConfig(t *testing.T) {
+	// 在测试开始时禁用 tracing
+	redis.DisableTracing = true
+	defer func() {
+		redis.DisableTracing = false
+	}()
+
 	t.Run("valid config", func(t *testing.T) {
 		// 启动 Redis 容器
 		addr, err := testutils.StartRedisSingleContainer()

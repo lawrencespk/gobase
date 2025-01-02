@@ -112,7 +112,11 @@ func isNetworkError(err error) bool {
 	errMsg := err.Error()
 	return strings.Contains(errMsg, "connection") ||
 		strings.Contains(errMsg, "timeout") ||
-		strings.Contains(errMsg, "network")
+		strings.Contains(errMsg, "network") ||
+		strings.Contains(errMsg, "aborted") ||
+		strings.Contains(errMsg, "reset") ||
+		strings.Contains(errMsg, "refused") ||
+		strings.Contains(errMsg, "closed")
 }
 
 // isLoadingError 判断是否为加载数据错误

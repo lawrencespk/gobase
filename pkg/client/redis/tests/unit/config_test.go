@@ -9,10 +9,12 @@ import (
 )
 
 func TestConfig(t *testing.T) {
-	// 启用测试模式，禁用连接检查
+	// 启用测试模式，禁用连接检查和追踪
 	redis.DisableConnectionCheck = true
+	redis.DisableTracing = true
 	defer func() {
 		redis.DisableConnectionCheck = false
+		redis.DisableTracing = false
 	}()
 
 	t.Run("valid config", func(t *testing.T) {

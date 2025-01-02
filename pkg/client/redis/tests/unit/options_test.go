@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOptions(t *testing.T) {
@@ -64,35 +65,49 @@ func TestOptions(t *testing.T) {
 	})
 
 	t.Run("metrics options", func(t *testing.T) {
-		metricsPrefix := "test_metrics"
-		opts := redis.DefaultOptions()
-		redis.WithMetrics(true)(opts)
-		redis.WithMetricsNamespace(metricsPrefix)(opts)
+		metrics := redis.NewRedisMetrics("test_redis")
 
+		opts := redis.DefaultOptions()
+
+		redis.WithEnableMetrics(true)(opts)
 		assert.True(t, opts.EnableMetrics)
-		assert.Equal(t, metricsPrefix, opts.MetricsNamespace)
+
+		redis.WithMetricsNamespace("test_namespace")(opts)
+		assert.Equal(t, "test_namespace", opts.MetricsNamespace)
+
+		redis.WithCollector(metrics)(opts)
+		assert.NotNil(t, opts.Collector)
+		assert.Equal(t, metrics, opts.Collector)
 	})
 }
 
-func TestMetricsOptions(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+func TestOptionsValidation(t *testing.T) {
+	t.Run("metrics validation", func(t *testing.T) {
+		// 创建 miniredis 实例
+		mr, err := miniredis.Run()
+		require.NoError(t, err)
+		defer mr.Close()
 
-	registry := prometheus.NewRegistry()
-	metricsPrefix := "test_redis_metrics_" + time.Now().Format("150405")
+		metrics := redis.NewRedisMetrics("test_redis")
 
-	client, err := redis.NewClient(
-		redis.WithAddress("localhost:6379"),
-		redis.WithMetrics(true),
-		redis.WithMetricsNamespace(metricsPrefix),
-		redis.WithRegistry(registry),
-	)
-
-	if err == nil {
-		defer client.Close()
-		metrics, err := registry.Gather()
+		// 使用 miniredis 地址
+		client, err := redis.NewClient(
+			redis.WithAddress(mr.Addr()),
+			redis.WithEnableMetrics(true),
+			redis.WithMetricsNamespace("test_namespace"),
+			redis.WithCollector(metrics),
+		)
 		assert.NoError(t, err)
-		assert.NotEmpty(t, metrics)
-	}
+		assert.NotNil(t, client)
+		defer client.Close()
+
+		// 测试不带 collector 的情况
+		client, err = redis.NewClient(
+			redis.WithAddress(mr.Addr()),
+			redis.WithEnableMetrics(true),
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+		defer client.Close()
+	})
 }

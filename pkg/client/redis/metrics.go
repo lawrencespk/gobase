@@ -1,62 +1,45 @@
 package redis
 
 import (
-	"context"
-	"time"
-
 	"gobase/pkg/monitor/prometheus/metric"
-
-	"github.com/go-redis/redis/v8"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
-// 定义指标结构
-type redisMetrics struct {
-	namespace             string
-	operationTotal        *metric.Counter
-	operationDuration     *metric.Histogram
+// RedisMetrics Redis指标收集器
+type RedisMetrics struct {
+	// 命令执行指标
+	commandDuration *metric.Histogram
+	commandErrors   *metric.Counter
+
+	// 连接池指标
 	poolActiveConnections *metric.Gauge
 	poolIdleConnections   *metric.Gauge
-	errorTotal            *metric.Counter
+	poolTotalConnections  *metric.Gauge
+	poolWaitCount         *metric.Gauge
+	poolTimeoutCount      *metric.Counter
+	poolHitCount          *metric.Counter
+	poolMissCount         *metric.Counter
 }
 
-var metrics *redisMetrics
-
-// initMetrics 初始化指标
-func initMetrics(registry prometheus.Registerer, namespace string) error {
-	// 如果已经初始化且命名空间相同，则直接返回
-	if metrics != nil && metrics.namespace == namespace {
-		return nil
-	}
-
-	// 如果已经初始化但命名空间不同，则需要重新初始化
-	if metrics != nil {
-		// 取消注册旧的指标
-		registry.Unregister(metrics.operationTotal)
-		registry.Unregister(metrics.operationDuration)
-		registry.Unregister(metrics.poolActiveConnections)
-		registry.Unregister(metrics.poolIdleConnections)
-		registry.Unregister(metrics.errorTotal)
-	}
-
-	// 创建新的指标
-	metrics = &redisMetrics{
-		namespace: namespace, // 添加 namespace 字段
-		operationTotal: metric.NewCounter(metric.CounterOpts{
+// NewRedisMetrics 创建Redis指标收集器
+func NewRedisMetrics(namespace string) *RedisMetrics {
+	m := &RedisMetrics{
+		// 命令执行指标
+		commandDuration: metric.NewHistogram(metric.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: "redis",
-			Name:      "operations_total",
-			Help:      "Total number of Redis operations",
-		}).WithLabels("operation", "status"),
-
-		operationDuration: metric.NewHistogram(metric.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: "redis",
-			Name:      "operation_duration_seconds",
-			Help:      "Redis operation latency in seconds",
+			Name:      "command_duration_seconds",
+			Help:      "Redis command execution duration in seconds",
 			Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1},
-		}).WithLabels("operation"),
+		}),
 
+		commandErrors: metric.NewCounter(metric.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "redis",
+			Name:      "command_errors_total",
+			Help:      "Total number of Redis command errors",
+		}),
+
+		// 连接池指标
 		poolActiveConnections: metric.NewGauge(metric.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: "redis",
@@ -71,135 +54,180 @@ func initMetrics(registry prometheus.Registerer, namespace string) error {
 			Help:      "Number of idle connections in the pool",
 		}),
 
-		errorTotal: metric.NewCounter(metric.CounterOpts{
+		poolTotalConnections: metric.NewGauge(metric.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: "redis",
-			Name:      "errors_total",
-			Help:      "Total number of Redis errors",
-		}).WithLabels("type"),
+			Name:      "pool_total_connections",
+			Help:      "Total number of connections in the pool",
+		}),
+
+		poolWaitCount: metric.NewGauge(metric.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: "redis",
+			Name:      "pool_wait_count",
+			Help:      "Number of connections waited for",
+		}),
+
+		poolTimeoutCount: metric.NewCounter(metric.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "redis",
+			Name:      "pool_timeout_total",
+			Help:      "Total number of connection timeouts",
+		}),
+
+		poolHitCount: metric.NewCounter(metric.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "redis",
+			Name:      "pool_hit_total",
+			Help:      "Total number of connection pool hits",
+		}),
+
+		poolMissCount: metric.NewCounter(metric.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "redis",
+			Name:      "pool_miss_total",
+			Help:      "Total number of connection pool misses",
+		}),
 	}
 
 	// 注册所有指标
-	collectors := []prometheus.Collector{
-		metrics.operationTotal,
-		metrics.operationDuration,
-		metrics.poolActiveConnections,
-		metrics.poolIdleConnections,
-		metrics.errorTotal,
+	m.registerMetrics()
+
+	return m
+}
+
+// registerMetrics 注册所有指标
+func (m *RedisMetrics) registerMetrics() {
+	// 注册命令执行指标
+	m.commandDuration.Register()
+	m.commandErrors.Register()
+
+	// 注册连接池指标
+	m.poolActiveConnections.Register()
+	m.poolIdleConnections.Register()
+	m.poolTotalConnections.Register()
+	m.poolWaitCount.Register()
+	m.poolTimeoutCount.Register()
+	m.poolHitCount.Register()
+	m.poolMissCount.Register()
+}
+
+// ObserveCommandExecution 观察命令执行
+func (m *RedisMetrics) ObserveCommandExecution(duration float64, err error) {
+	m.commandDuration.Observe(duration)
+	if err != nil {
+		m.commandErrors.Inc()
+	}
+}
+
+// UpdatePoolStats 更新连接池统计信息
+func (m *RedisMetrics) UpdatePoolStats(stats *PoolStats) {
+	m.poolActiveConnections.Set(float64(stats.ActiveCount))
+	m.poolIdleConnections.Set(float64(stats.IdleCount))
+	m.poolTotalConnections.Set(float64(stats.TotalCount))
+	m.poolWaitCount.Set(float64(stats.WaitCount))
+	m.poolTimeoutCount.Add(float64(stats.TimeoutCount))
+	m.poolHitCount.Add(float64(stats.HitCount))
+	m.poolMissCount.Add(float64(stats.MissCount))
+}
+
+// pipelineMetrics Pipeline指标收集器
+type pipelineMetrics struct {
+	// 命令执行总数
+	commandsTotal *metric.Counter
+	// 错误总数
+	errorTotal *metric.Counter
+	// 执行延迟
+	executionLatency *metric.Histogram
+}
+
+// newPipelineMetrics 创建Pipeline指标收集器
+func newPipelineMetrics(namespace string) *pipelineMetrics {
+	m := &pipelineMetrics{
+		// 命令执行总数
+		commandsTotal: metric.NewCounter(metric.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "redis_pipeline",
+			Name:      "commands_total",
+			Help:      "Total number of pipeline commands",
+		}),
+
+		// 错误总数
+		errorTotal: metric.NewCounter(metric.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "redis_pipeline",
+			Name:      "errors_total",
+			Help:      "Total number of pipeline errors",
+		}),
+
+		// 执行延迟
+		executionLatency: metric.NewHistogram(metric.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: "redis_pipeline",
+			Name:      "execution_latency_seconds",
+			Help:      "Pipeline execution latency in seconds",
+			Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1},
+		}),
+	}
+
+	// 注册所有指标
+	m.register()
+
+	return m
+}
+
+func (m *pipelineMetrics) register() {
+	// 注册所有指标
+	m.commandsTotal.Register()
+	m.errorTotal.Register()
+	m.executionLatency.Register()
+}
+
+// Describe 实现 metric.Collector 接口
+func (m *RedisMetrics) Describe(ch chan<- *metric.Desc) {
+	if m == nil {
+		return
+	}
+	collectors := []metric.Collector{
+		m.poolActiveConnections,
+		m.poolIdleConnections,
+		m.poolTotalConnections,
+		m.poolWaitCount,
+		m.poolTimeoutCount,
+		m.poolHitCount,
+		m.poolMissCount,
+		m.commandErrors,
+		m.commandDuration,
 	}
 
 	for _, collector := range collectors {
-		if err := registry.Register(collector); err != nil {
-			// 忽略已注册的错误
-			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
-				return err
-			}
-		}
+		collector.Describe(ch)
 	}
-
-	return nil
 }
 
-// withMetrics 包装Redis操作并记录监控指标
-func withMetrics(ctx context.Context, operation string, registry prometheus.Registerer, f func() error) error {
-	// 从上下文中获取 namespace
-	namespace := "gobase"
-	if client, ok := ctx.Value(clientKey).(*client); ok && client != nil {
-		// 优先使用客户端配置的 namespace
-		if client.options != nil && client.options.MetricsNamespace != "" {
-			namespace = client.options.MetricsNamespace
-		}
-	} else if ns, ok := ctx.Value(namespaceKey).(string); ok && ns != "" {
-		// 如果没有客户端配置，则尝试从上下文中获取
-		namespace = ns
+// Collect 实现 metric.Collector 接口
+func (m *RedisMetrics) Collect(ch chan<- metric.Metric) {
+	if m == nil {
+		return
+	}
+	collectors := []metric.Collector{
+		m.poolActiveConnections,
+		m.poolIdleConnections,
+		m.poolTotalConnections,
+		m.poolWaitCount,
+		m.poolTimeoutCount,
+		m.poolHitCount,
+		m.poolMissCount,
+		m.commandErrors,
+		m.commandDuration,
 	}
 
-	// 确保指标已初始化
-	if err := initMetrics(registry, namespace); err != nil {
-		return err
+	for _, collector := range collectors {
+		collector.Collect(ch)
 	}
-
-	startTime := time.Now()
-	err := f()
-	duration := time.Since(startTime).Seconds()
-
-	if metrics != nil {
-		// 记录操作状态和延迟
-		status := "success"
-		if err != nil {
-			status = "error"
-			// 记录错误
-			errType := "unknown"
-			if redisErr, ok := err.(redis.Error); ok {
-				errType = redisErr.Error()
-			}
-			metrics.errorTotal.WithLabelValues(errType).Inc()
-		}
-
-		// 记录操作指标
-		metrics.operationTotal.WithLabelValues(operation, status).Inc()
-		metrics.operationDuration.WithLabelValues(operation).Observe(duration)
-
-		// 更新连接池指标
-		if client, ok := ctx.Value(clientKey).(*client); ok && client != nil {
-			if stats := client.Pool().Stats(); stats != nil {
-				metrics.poolActiveConnections.Set(float64(stats.TotalConns))
-				metrics.poolIdleConnections.Set(float64(stats.IdleConns))
-			}
-		}
-	}
-
-	return err
 }
 
-// 定义上下文键类型
-type contextKey string
-
-const (
-	clientKeyStr    contextKey = "redis_client"
-	namespaceKeyStr contextKey = "redis_namespace"
-)
-
-// 定义上下文键
-var (
-	clientKey    = clientKeyStr
-	namespaceKey = namespaceKeyStr
-)
-
-// 添加 pipelineMetrics 结构体
-type pipelineMetrics struct {
-	commandsTotal    *prometheus.CounterVec
-	executionLatency *prometheus.HistogramVec
-	errorTotal       *prometheus.CounterVec
-}
-
-// 添加 newPipelineMetrics 函数
-func newPipelineMetrics(namespace string) *pipelineMetrics {
-	return &pipelineMetrics{
-		commandsTotal: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Name:      "pipeline_commands_total",
-				Help:      "Total number of commands added to pipeline",
-			},
-			[]string{"operation"},
-		),
-		executionLatency: prometheus.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: namespace,
-				Name:      "pipeline_execution_duration_seconds",
-				Help:      "Pipeline execution latency in seconds",
-				Buckets:   []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1},
-			},
-			[]string{"status"},
-		),
-		errorTotal: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Name:      "pipeline_errors_total",
-				Help:      "Total number of pipeline errors",
-			},
-			[]string{"operation", "error_type"},
-		),
-	}
+// GetCollector 返回 metric.Collector 接口
+func (m *RedisMetrics) GetCollector() metric.Collector {
+	return m
 }

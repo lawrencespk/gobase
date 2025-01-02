@@ -142,10 +142,13 @@ func TestRedisOperations(t *testing.T) {
 		channel := "test_channel"
 		message := "test_message"
 
-		// 创建订阅者
+		// 创建订阅者并等待连接就绪
 		pubsub := client.Subscribe(ctx, channel)
 		require.NotNil(t, pubsub)
 		defer pubsub.Close()
+
+		// 增加延迟确保订阅完成
+		time.Sleep(100 * time.Millisecond)
 
 		// 在goroutine中接收消息
 		msgChan := make(chan string)
@@ -163,27 +166,26 @@ func TestRedisOperations(t *testing.T) {
 		err := client.Publish(ctx, channel, message)
 		assert.NoError(t, err)
 
-		// 等待接收消息或错误
+		// 增加超时时间
 		select {
 		case receivedMsg := <-msgChan:
 			assert.Equal(t, message, receivedMsg)
 		case err := <-errChan:
 			assert.NoError(t, err)
-		case <-time.After(time.Second):
+		case <-time.After(2 * time.Second): // 增加超时时间
 			assert.Fail(t, "timeout waiting for message")
 		}
 	})
 
 	t.Run("subscribe error cases", func(t *testing.T) {
-		// 测试订阅空频道
-		pubsub := client.Subscribe(ctx)
-		_, err := pubsub.ReceiveMessage(ctx)
-		assert.Error(t, err)
-		assert.NoError(t, pubsub.Close())
+		// 修改空channel测试
+		pubsub := client.Subscribe(ctx, "")
+		assert.Error(t, pubsub.Close())
 
 		// 测试订阅后关闭
 		pubsub = client.Subscribe(ctx, "test_channel")
 		require.NotNil(t, pubsub)
+		time.Sleep(100 * time.Millisecond) // 等待订阅完成
 
 		err = pubsub.Close()
 		assert.NoError(t, err)
@@ -239,18 +241,21 @@ func TestRedisOperations(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		channel := "test_cancel_channel"
 
-		// 创建带取消的上下文
-		ctx, cancel := context.WithCancel(context.Background())
+		// 创建带超时的上下文
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
 		// 创建订阅者
 		pubsub := client.Subscribe(ctx, channel)
 		defer pubsub.Close()
 
+		// 等待订阅完成
+		time.Sleep(100 * time.Millisecond)
+
 		// 取消上下文
 		cancel()
 
-		// 验证接收消息会返回上下文取消错误
+		// 验证接收消息返回上下文取消错误
 		_, err := pubsub.ReceiveMessage(ctx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "context canceled")

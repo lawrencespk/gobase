@@ -4,9 +4,8 @@ import (
 	"time"
 
 	"gobase/pkg/logger/types"
-
-	"github.com/opentracing/opentracing-go"
-	"github.com/prometheus/client_golang/prometheus"
+	"gobase/pkg/monitor/prometheus/metric"
+	"gobase/pkg/trace/jaeger"
 )
 
 // Options Redis客户端配置选项
@@ -46,38 +45,46 @@ type Options struct {
 
 	// 日志和追踪
 	Logger types.Logger
-	Tracer opentracing.Tracer
+	Tracer *jaeger.Provider
 
 	// 重试配置
 	RetryBackoff time.Duration // 重试间隔时间
 	ConnTimeout  time.Duration // 连接超时时间
 
-	Registry *prometheus.Registry // Prometheus registry
+	// 使用 metric.Collector
+	Collector metric.Collector // Prometheus collector
 }
 
 // DefaultOptions 返回默认配置选项
 func DefaultOptions() *Options {
 	return &Options{
-		Addresses:        []string{},
-		Username:         "",
-		Password:         "",
-		DB:               0,
-		MaxRetries:       3,
-		PoolSize:         10,
-		MinIdleConns:     5,
-		IdleTimeout:      time.Minute * 5,
-		PoolTimeout:      time.Second * 4,
-		DialTimeout:      time.Second * 5,
-		ReadTimeout:      time.Second * 3,
-		WriteTimeout:     time.Second * 3,
-		RetryBackoff:     time.Millisecond * 100,
-		ConnTimeout:      time.Second * 3,
-		Logger:           &types.NoopLogger{},
-		Tracer:           opentracing.NoopTracer{},
-		EnableMetrics:    false,
-		MetricsNamespace: "redis_client",
-		EnableTracing:    false,
-		Registry:         prometheus.NewRegistry(),
+		Addresses:        []string{},             // 默认不设置地址
+		Username:         "",                     // 默认不设置用户名
+		Password:         "",                     // 默认不设置密码
+		DB:               0,                      // 默认不设置数据库
+		MaxRetries:       3,                      // 默认最大重试次数
+		PoolSize:         10,                     // 默认连接池大小
+		MinIdleConns:     0,                      // 默认最小空闲连接数
+		IdleTimeout:      time.Minute * 5,        // 默认空闲超时时间
+		PoolTimeout:      time.Second * 4,        // 默认连接池超时时间
+		DialTimeout:      time.Second * 5,        // 默认连接超时时间
+		ReadTimeout:      time.Second * 3,        // 默认读取超时时间
+		WriteTimeout:     time.Second * 3,        // 默认写入超时时间
+		RetryBackoff:     time.Millisecond * 100, // 默认重试间隔时间
+		ConnTimeout:      time.Second * 3,        // 默认连接超时时间
+		Logger:           &types.NoopLogger{},    // 默认不设置日志记录器
+		Tracer:           nil,                    // 默认不设置链路追踪器
+		EnableMetrics:    false,                  // 默认不启用指标收集
+		MetricsNamespace: "redis_client",         // 默认指标命名空间
+		EnableTracing:    false,                  // 默认不启用链路追踪
+		Collector:        nil,                    // 默认不设置 Prometheus collector
+	}
+}
+
+// WithCollector 设置 Prometheus collector
+func WithCollector(c metric.Collector) Option {
+	return func(o *Options) {
+		o.Collector = c
 	}
 }
 
@@ -92,7 +99,7 @@ func WithLogger(logger types.Logger) Option {
 }
 
 // WithTracer 设置链路追踪器
-func WithTracer(tracer opentracing.Tracer) Option {
+func WithTracer(tracer *jaeger.Provider) Option {
 	return func(o *Options) {
 		o.Tracer = tracer
 	}
@@ -235,20 +242,6 @@ func WithMetrics(enable bool) Option {
 func WithTracing(enable bool) Option {
 	return func(o *Options) {
 		o.EnableTracing = enable
-	}
-}
-
-// WithRegistry 设置 Prometheus registry
-func WithRegistry(registry *prometheus.Registry) Option {
-	return func(o *Options) {
-		o.Registry = registry
-	}
-}
-
-// WithPoolTimeout 设置连接池超时时间
-func WithPoolTimeout(timeout time.Duration) Option {
-	return func(o *Options) {
-		o.PoolTimeout = timeout
 	}
 }
 

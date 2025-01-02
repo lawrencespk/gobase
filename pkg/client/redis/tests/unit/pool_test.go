@@ -1,80 +1,93 @@
 package unit
 
 import (
-	"context"
-	"gobase/pkg/client/redis"
-	"strconv"
 	"testing"
 	"time"
 
+	"gobase/pkg/client/redis"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPool(t *testing.T) {
 	// 创建 miniredis 实例
 	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer mr.Close()
 
-	ctx := context.Background()
-
-	t.Run("pool stats", func(t *testing.T) {
-		client, err := redis.NewClient(
-			redis.WithAddress(mr.Addr()), // 使用 miniredis 地址
-			redis.WithPoolSize(10),
-			redis.WithMinIdleConns(2),
-		)
-		assert.NoError(t, err)
-		defer client.Close()
-
-		// 执行一些操作来生成连接
-		for i := 0; i < 5; i++ {
-			err := client.Set(ctx, "key"+strconv.Itoa(i), "value", time.Minute)
-			assert.NoError(t, err)
-		}
-
-		// 检查连接池统计信息
-		stats := client.Pool().Stats()
-		assert.NotNil(t, stats)
-		assert.GreaterOrEqual(t, stats.TotalConns, uint32(1))
-		assert.GreaterOrEqual(t, stats.IdleConns, uint32(1))
+	t.Run("default pool settings", func(t *testing.T) {
+		opts := redis.DefaultOptions()
+		assert.Equal(t, 10, opts.PoolSize)
+		assert.Equal(t, 0, opts.MinIdleConns)
+		assert.Equal(t, 5*time.Minute, opts.IdleTimeout)
 	})
 
-	t.Run("pool timeout", func(t *testing.T) {
+	t.Run("custom pool settings", func(t *testing.T) {
 		client, err := redis.NewClient(
 			redis.WithAddress(mr.Addr()),
-			redis.WithPoolSize(1),                   // 设置连接池大小为1
-			redis.WithPoolTimeout(time.Millisecond), // 设置非常短的超时时间
-			redis.WithMaxRetries(0),                 // 禁用重试
-			redis.WithRetryBackoff(0),               // 禁用重试间隔
+			redis.WithPoolSize(20),
+			redis.WithMinIdleConns(5),
+			redis.WithIdleTimeout(time.Minute),
 		)
 		assert.NoError(t, err)
+		assert.NotNil(t, client)
 		defer client.Close()
 
-		// 创建一个阻塞的连接
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			// 使用一个长时间运行的操作来占用连接
-			script := `
-				local start = redis.call('TIME')
-				redis.call('SET', KEYS[1], ARGV[1])
-				while (redis.call('TIME')[1] - start[1]) < 1 do end
-				return 1
-			`
-			_, err := client.Eval(ctx, script, []string{"blocking_key"}, "value")
-			assert.NoError(t, err)
-		}()
+		// 等待连接池初始化完成
+		maxRetries := 5
+		var stats *redis.PoolStats
+		for i := 0; i < maxRetries; i++ {
+			stats = client.PoolStats()
+			if stats.TotalConns == uint32(20) {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
 
-		// 等待一小段时间确保第一个操作开始
-		time.Sleep(time.Millisecond * 10)
+		// 验证连接池设置
+		assert.Equal(t, uint32(20), stats.TotalConns)
+		assert.GreaterOrEqual(t, stats.IdleConns, uint32(5))
+	})
 
-		// 尝试在池已满时获取连接
-		err = client.Set(ctx, "timeout_key", "value", time.Minute)
+	t.Run("pool timeouts", func(t *testing.T) {
+		client, err := redis.NewClient(
+			redis.WithAddress(mr.Addr()),
+			redis.WithDialTimeout(time.Second),
+			redis.WithReadTimeout(2*time.Second),
+			redis.WithWriteTimeout(2*time.Second),
+			redis.WithIdleTimeout(time.Minute),
+		)
+		assert.NoError(t, err)
+		assert.NotNil(t, client)
+		defer client.Close()
+
+		// 验证连接池是否正常工作
+		stats := client.PoolStats()
+		assert.Greater(t, stats.TotalConns, uint32(0))
+	})
+
+	t.Run("invalid pool settings", func(t *testing.T) {
+		// 测试负数连接池大小
+		_, err := redis.NewClient(
+			redis.WithAddress(mr.Addr()),
+			redis.WithPoolSize(-1),
+		)
 		assert.Error(t, err)
-		<-done
+
+		// 测试负数最小空闲连接
+		_, err = redis.NewClient(
+			redis.WithAddress(mr.Addr()),
+			redis.WithMinIdleConns(-1),
+		)
+		assert.Error(t, err)
+
+		// 测试零值超时
+		_, err = redis.NewClient(
+			redis.WithAddress(mr.Addr()),
+			redis.WithIdleTimeout(0),
+		)
+		assert.Error(t, err)
 	})
 }

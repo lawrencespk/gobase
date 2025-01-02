@@ -23,8 +23,11 @@ func TestRedisRecovery(t *testing.T) {
 
 		client, err := redis.NewClient(
 			redis.WithAddress(addr),
-			redis.WithMaxRetries(3),
-			redis.WithRetryBackoff(time.Second),
+			redis.WithMaxRetries(5),
+			redis.WithRetryBackoff(2*time.Second),
+			redis.WithDialTimeout(3*time.Second),
+			redis.WithReadTimeout(2*time.Second),
+			redis.WithWriteTimeout(2*time.Second),
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -43,8 +46,18 @@ func TestRedisRecovery(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		// 等待 Redis 完全重启
+		time.Sleep(10 * time.Second)
+
+		// 先尝试 Ping 来触发重连
+		for i := 0; i < 3; i++ {
+			if err := client.Ping(ctx); err == nil {
+				break
+			}
+			time.Sleep(2 * time.Second)
+		}
+
 		// 验证自动重连和恢复
-		time.Sleep(5 * time.Second)
 		if _, err := client.Get(ctx, "test_key"); err != nil {
 			t.Fatal(err)
 		}

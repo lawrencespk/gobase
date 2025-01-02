@@ -107,8 +107,43 @@ func (c *RedisCollector) UpdatePoolStats(stats *PoolStats) {
 	c.poolMisses.Add(float64(stats.MissCount))
 }
 
-// ObserveCommandExecution 观察命令执行
+// SetPoolStats 更新连接池统计信息
+func (c *RedisCollector) SetPoolStats(hits, misses, timeouts, totalConns, idleConns, staleConns float64) {
+	if c == nil {
+		return
+	}
+	c.poolHits.Add(hits)
+	c.poolMisses.Add(misses)
+	c.poolTimeout.Add(timeouts)
+	c.poolTotal.Set(totalConns)
+	c.poolIdle.Set(idleConns)
+	// 可以添加一个新的指标来跟踪过期连接
+	// c.poolStale.Set(staleConns)
+}
+
+// SetPoolConfig 更新连接池配置指标
+func (c *RedisCollector) SetPoolConfig(poolSize, minIdleConns float64) {
+	if c == nil {
+		return
+	}
+	// 这些是配置值，使用 Gauge 类型
+	c.poolTotal.Set(poolSize)
+	c.poolIdle.Set(minIdleConns)
+}
+
+// SetCurrentPoolSize 更新当前连接池大小
+func (c *RedisCollector) SetCurrentPoolSize(size float64) {
+	if c == nil {
+		return
+	}
+	c.poolActive.Set(size)
+}
+
+// ObserveCommandExecution 观察命令执行情况
 func (c *RedisCollector) ObserveCommandExecution(duration float64, err error) {
+	if c == nil {
+		return
+	}
 	c.cmdTotal.Inc()
 	if err != nil {
 		c.cmdErrors.Inc()

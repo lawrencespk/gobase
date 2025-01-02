@@ -108,17 +108,6 @@ func (c *client) IncrBy(ctx context.Context, key string, value int64) (int64, er
 	return result.(int64), nil
 }
 
-// Close 关闭客户端
-func (c *client) Close() error {
-	err := c.withOperation(context.Background(), "Close", func() error {
-		return c.client.Close()
-	})
-	if err != nil {
-		return errors.NewRedisConnError("failed to close redis connection", err)
-	}
-	return nil
-}
-
 // Ping 心跳检测
 func (c *client) Ping(ctx context.Context) error {
 	err := c.withOperation(ctx, "Ping", func() error {
@@ -192,11 +181,33 @@ func (c *client) Publish(ctx context.Context, channel string, message interface{
 func (c *client) Subscribe(ctx context.Context, channels ...string) PubSub {
 	// 参数验证
 	if len(channels) == 0 {
-		return &pubSub{err: errors.NewRedisCommandError("channels are required", nil)}
+		return &pubSub{
+			err:    errors.NewRedisCommandError("channels are required", nil),
+			client: c,
+		}
+	}
+
+	// 验证每个 channel 不能为空
+	for _, channel := range channels {
+		if channel == "" {
+			return &pubSub{
+				err:    errors.NewRedisCommandError("channel cannot be empty", nil),
+				client: c,
+			}
+		}
 	}
 
 	// 创建订阅
 	ps := c.client.Subscribe(ctx, channels...)
+
+	// 等待订阅确认
+	if _, err := ps.Receive(ctx); err != nil {
+		return &pubSub{
+			err:    errors.NewRedisCommandError("failed to subscribe", err),
+			client: c,
+		}
+	}
+
 	return &pubSub{
 		ps:     ps,
 		client: c,
@@ -216,8 +227,21 @@ func (p *pubSub) ReceiveMessage(ctx context.Context) (*Message, error) {
 		return nil, p.err
 	}
 
+	// 增加 ps 为空的检查
+	if p.ps == nil {
+		return nil, errors.NewRedisConnError("pubsub connection is nil", nil)
+	}
+
+	// 增加上下文取消检查
+	if ctx.Err() != nil {
+		return nil, errors.NewRedisCommandError("context canceled", ctx.Err())
+	}
+
 	msg, err := p.ps.ReceiveMessage(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, errors.NewRedisCommandError("context canceled", ctx.Err())
+		}
 		if isReadOnlyError(err) {
 			return nil, errors.NewRedisReadOnlyError("failed to receive message: readonly", err)
 		}
@@ -233,11 +257,19 @@ func (p *pubSub) ReceiveMessage(ctx context.Context) (*Message, error) {
 
 // Close 关闭订阅
 func (p *pubSub) Close() error {
+	// 如果是初始化错误，直接返回该错误
 	if p.err != nil {
 		return p.err
 	}
 
+	// 如果 ps 为空，说明是初始化错误或已经关闭
+	if p.ps == nil {
+		return errors.NewRedisConnError("pubsub connection is nil or already closed", nil)
+	}
+
 	err := p.ps.Close()
+	// 关闭后将 ps 设置为 nil，避免重复关闭
+	p.ps = nil
 	if err != nil {
 		return errors.NewRedisConnError("failed to close pubsub connection", err)
 	}

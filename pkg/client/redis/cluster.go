@@ -5,17 +5,17 @@ import (
 	"gobase/pkg/errors"
 	"gobase/pkg/errors/codes"
 	"gobase/pkg/logger/types"
+	"gobase/pkg/trace/jaeger"
 	"time"
 
 	"github.com/go-redis/redis/v8"
-	"github.com/opentracing/opentracing-go"
 )
 
 // clusterClient Redis集群客户端实现
 type clusterClient struct {
 	client  *redis.ClusterClient
 	logger  types.Logger
-	tracer  opentracing.Tracer
+	tracer  *jaeger.Provider
 	options *Options
 }
 

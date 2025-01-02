@@ -2,20 +2,21 @@ package redis
 
 import (
 	"context"
-
-	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
+	"gobase/pkg/trace/jaeger"
 )
 
 // startSpan 创建一个新的追踪span
-func startSpan(ctx context.Context, tracer opentracing.Tracer, operationName string) (opentracing.Span, context.Context) {
-	var span opentracing.Span
-	if parent := opentracing.SpanFromContext(ctx); parent != nil {
-		span = tracer.StartSpan(operationName, opentracing.ChildOf(parent.Context()))
-	} else {
-		span = tracer.StartSpan(operationName)
+func startSpan(ctx context.Context, tracer *jaeger.Provider, operationName string) (*jaeger.Span, context.Context) {
+	if tracer == nil {
+		return nil, ctx
 	}
 
-	ext.DBType.Set(span, "redis")
-	return span, opentracing.ContextWithSpan(ctx, span)
+	span, err := jaeger.NewSpan(operationName,
+		jaeger.WithParent(ctx),
+		jaeger.WithTag("db.type", "redis"),
+	)
+	if err != nil {
+		return nil, ctx
+	}
+	return span, span.Context()
 }
