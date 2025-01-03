@@ -143,7 +143,10 @@ func NewClient(opts ...Option) (Client, error) {
 	}
 
 	// 初始化Redis监控指标收集器
-	metrics := collector.NewRedisCollector(options.MetricsNamespace)
+	var metrics *collector.RedisCollector
+	if options.EnableMetrics {
+		metrics = collector.NewRedisCollector(options.MetricsNamespace)
+	}
 
 	// 创建客户端
 	c := &client{

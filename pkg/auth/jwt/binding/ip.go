@@ -55,10 +55,10 @@ func NewIPValidator(store Store) (*IPValidator, error) {
 		return nil, errors.Wrap(err, "failed to create logger")
 	}
 
-	// 创建业务指标收集器
-	metrics := collector.NewBusinessCollector("gobase_auth")
-	if err := metrics.Register(); err != nil {
-		return nil, errors.Wrap(err, "failed to register metrics collector")
+	// 使用已注册的 collector
+	metrics := GetCollector()
+	if metrics == nil {
+		return nil, errors.NewError(codes.SystemError, "metrics collector not initialized", nil)
 	}
 
 	return &IPValidator{
