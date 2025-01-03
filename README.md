@@ -49,3 +49,5 @@
 ### 16. Logger 中间件
 [Logger 中间件文档](/pkg/middleware/logger/README.md)
 
+### 17. Cache 缓存
+[Cache 缓存文档](/pkg/cache/README.md)
