@@ -56,7 +56,11 @@ type StandardClaims struct {
 func NewStandardClaims(options ...ClaimsOption) *StandardClaims {
 	claims := &StandardClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt: jwt.NewNumericDate(time.Now()),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "gobase",
+			Subject:   "token",
+			Audience:  []string{"gobase"},
+			NotBefore: jwt.NewNumericDate(time.Now()),
 		},
 	}
 

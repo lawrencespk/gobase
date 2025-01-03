@@ -32,6 +32,22 @@ var errorCodeMappings = map[string][]string{
 		codes.RedisKeyNotFoundError,
 		codes.RedisKeyExpiredError,
 	},
+	// JWT相关错误码映射
+	codes.TokenInvalid: {
+		codes.TokenGenerationError,
+		codes.TokenTypeMismatch,
+		codes.ClaimsInvalid,
+		codes.ClaimsMissing,
+	},
+	codes.TokenExpired: {
+		codes.ClaimsExpired,
+		codes.SessionExpired,
+		codes.TokenExpired,
+	},
+	codes.SignatureInvalid: {
+		codes.KeyInvalid,
+		codes.AlgorithmMismatch,
+	},
 }
 
 // checkErrorCodeMapping 检查错误码是否匹配或在映射关系中

@@ -99,3 +99,27 @@ func NewRotationFailedError(message string, cause error) types.Error {
 func NewTokenGenerationError(message string, cause error) types.Error {
 	return NewError(codes.TokenGenerationError, message, cause)
 }
+
+// IsTokenExpiredError 判断是否为Token过期错误
+func IsTokenExpiredError(err error) bool {
+	if e, ok := err.(types.Error); ok {
+		return checkErrorCodeMapping(e.Code(), codes.TokenExpired)
+	}
+	return false
+}
+
+// IsSignatureInvalidError 判断是否为签名无效错误
+func IsSignatureInvalidError(err error) bool {
+	if e, ok := err.(types.Error); ok {
+		return checkErrorCodeMapping(e.Code(), codes.SignatureInvalid)
+	}
+	return false
+}
+
+// IsTokenInvalidError 判断是否为Token无效错误
+func IsTokenInvalidError(err error) bool {
+	if e, ok := err.(types.Error); ok {
+		return checkErrorCodeMapping(e.Code(), codes.TokenInvalid)
+	}
+	return false
+}
