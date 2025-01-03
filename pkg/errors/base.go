@@ -62,6 +62,16 @@ type baseError struct {
 	stack   []string
 }
 
+// Is 实现错误比较
+func (e *baseError) Is(target error) bool {
+	// 尝试将目标错误转换为我们的错误类型
+	if t, ok := target.(*baseError); ok {
+		// 比较错误码
+		return checkErrorCodeMapping(e.code, t.code)
+	}
+	return false
+}
+
 // NewError 创建新的错误
 func NewError(code string, message string, cause error) types.Error {
 	e := &baseError{

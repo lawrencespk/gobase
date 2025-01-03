@@ -25,3 +25,8 @@ func NewCacheFullError(message string, cause error) error {
 func NewCacheNotFoundError(message string, cause error) error {
 	return NewError(codes.CacheNotFoundError, message, cause)
 }
+
+// NewCacheCapacityError 创建一个缓存容量错误
+func NewCacheCapacityError(msg string, cause error) error {
+	return NewError(codes.CacheCapacityLimitExceeded, msg, cause)
+}

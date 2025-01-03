@@ -138,10 +138,11 @@ const (
 	ExecutionError = "2603" // 执行错误
 
 	// 缓存相关错误码 (2700-2799)
-	CacheMissError     = "2700" // 缓存未命中
-	CacheExpiredError  = "2701" // 缓存已过期
-	CacheFullError     = "2702" // 缓存已满
-	CacheNotFoundError = "2703" // 缓存层级不存在
+	CacheMissError             = "2700" // 缓存未命中
+	CacheExpiredError          = "2701" // 缓存已过期
+	CacheFullError             = "2702" // 缓存已满
+	CacheNotFoundError         = "2703" // 缓存层级不存在
+	CacheCapacityLimitExceeded = "2704" // 缓存容量限制已超出
 
 	// 数据库相关错误码 (2800-2899)
 	DBConnError        = "2800" // 数据库连接错误
