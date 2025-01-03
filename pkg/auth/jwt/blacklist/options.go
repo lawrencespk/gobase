@@ -23,6 +23,9 @@ type Options struct {
 
 	// 日志记录器
 	Log types.Logger
+
+	// 键前缀
+	KeyPrefix string `json:"key_prefix" yaml:"key_prefix"`
 }
 
 // RedisOptions Redis配置选项
@@ -47,6 +50,11 @@ func (o *Options) Validate() error {
 	// 验证清理间隔
 	if o.CleanupInterval < 0 {
 		return errors.NewConfigInvalidError("cleanup interval must be non-negative", nil)
+	}
+
+	// 添加KeyPrefix默认值
+	if o.KeyPrefix == "" {
+		o.KeyPrefix = "jwt:blacklist:"
 	}
 
 	return nil

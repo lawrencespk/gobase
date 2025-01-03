@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"gobase/pkg/auth/jwt/store"
+	"gobase/pkg/client/redis"
 	"gobase/pkg/errors"
 	"gobase/pkg/errors/codes"
 	"gobase/pkg/logger/types"
@@ -15,17 +15,34 @@ import (
 
 // SessionStore JWT会话存储
 type SessionStore struct {
-	store   store.Store
+	store   Store
 	logger  types.Logger
 	metrics *metric.Counter
 }
 
 // NewSessionStore 创建会话存储实例
-func NewSessionStore(opts store.Options, logger types.Logger) (*SessionStore, error) {
-	// 创建存储实例
-	redisStore, err := store.NewRedisStore(opts, logger)
+func NewSessionStore(opts *Options, logger types.Logger) (*SessionStore, error) {
+	// 使用我们自己的 Redis 客户端，使用 Option 函数配置
+	redisClient, err := redis.NewClient(
+		redis.WithAddress(opts.Redis.Addr),
+		redis.WithPassword(opts.Redis.Password),
+		redis.WithDB(opts.Redis.DB),
+		redis.WithLogger(logger),
+	)
 	if err != nil {
-		return nil, err
+		return nil, errors.NewError(codes.InitializeError, "failed to create redis client", err)
+	}
+
+	// 验证连接
+	if err := redisClient.Ping(context.Background()); err != nil {
+		return nil, errors.NewError(codes.InitializeError, "failed to connect to redis", err)
+	}
+
+	// 创建存储实例
+	redisStore := NewRedisStore(redisClient, opts)
+	if redisStore == nil {
+		redisClient.Close()
+		return nil, errors.NewError(codes.InitializeError, "failed to create redis store", nil)
 	}
 
 	ss := &SessionStore{
@@ -55,14 +72,6 @@ func (s *SessionStore) Save(ctx context.Context, sessionID string, session *Sess
 		defer s.metrics.Inc()
 	}
 
-	// 序列化会话数据
-	data, err := json.Marshal(session)
-	if err != nil {
-		s.logger.Error(ctx, "failed to marshal session data",
-			types.Field{Key: "error", Value: err})
-		return errors.NewError(codes.SerializationError, "failed to marshal session data", err)
-	}
-
 	// 计算过期时间
 	expiration := session.ExpiresAt.Sub(time.Now())
 	if expiration <= 0 {
@@ -72,9 +81,8 @@ func (s *SessionStore) Save(ctx context.Context, sessionID string, session *Sess
 		return errors.NewError(codes.ValidationError, "session already expired", nil)
 	}
 
-	// 存储会话数据
-	err = s.store.Set(ctx, sessionID, string(data), expiration)
-	if err != nil {
+	// 使用 Set 方法来处理序列化和存储
+	if err := s.Set(ctx, sessionID, session, expiration); err != nil {
 		s.logger.Error(ctx, "failed to save session",
 			types.Field{Key: "session_id", Value: sessionID},
 			types.Field{Key: "error", Value: err})
@@ -156,49 +164,15 @@ func (s *SessionStore) Close() error {
 	return s.store.Close()
 }
 
-func (s *SessionStore) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
-	span, ctx := jaeger.StartSpanFromContext(ctx, "SessionStore.Set")
-	defer span.Finish()
-
-	// 序列化数据
-	data, err := json.Marshal(value)
-	if err != nil {
-		s.logger.Error(ctx, "failed to marshal session data",
-			types.Field{Key: "error", Value: err},
-			types.Field{Key: "key", Value: key})
-		return errors.NewError(codes.SerializationError, "failed to marshal session data", err)
-	}
-
-	// 检查会话是否已过期
-	if ttl <= 0 {
-		s.logger.Error(ctx, "session already expired",
-			types.Field{Key: "key", Value: key},
-			types.Field{Key: "expires_at", Value: time.Now()})
-		return errors.NewSessionExpiredError("session already expired", nil)
-	}
-
-	// 保存会话数据
-	if err := s.store.Set(ctx, key, data, ttl); err != nil {
-		s.logger.Error(ctx, "failed to save session",
-			types.Field{Key: "key", Value: key},
-			types.Field{Key: "error", Value: err})
-		return err
-	}
-
-	s.logger.Debug(ctx, "session saved",
-		types.Field{Key: "key", Value: key},
-		types.Field{Key: "ttl", Value: ttl})
-	return nil
-}
-
+// Get 加载会话数据
 func (s *SessionStore) Get(ctx context.Context, sessionID string) (*Session, error) {
 	span, ctx := jaeger.StartSpanFromContext(ctx, "SessionStore.Get")
 	defer span.Finish()
 
-	// 获取会话数据
+	// 获取原始数据
 	data, err := s.store.Get(ctx, sessionID)
 	if err != nil {
-		s.logger.Error(ctx, "failed to load session",
+		s.logger.Error(ctx, "failed to get session",
 			types.Field{Key: "error", Value: err},
 			types.Field{Key: "session_id", Value: sessionID})
 		return nil, err
@@ -221,9 +195,30 @@ func (s *SessionStore) Get(ctx context.Context, sessionID string) (*Session, err
 		return nil, errors.NewSessionExpiredError("session expired", nil)
 	}
 
-	expiration := session.ExpiresAt.Sub(time.Now())
-	s.logger.Debug(ctx, "session loaded",
-		types.Field{Key: "session_id", Value: sessionID},
-		types.Field{Key: "expiration", Value: expiration})
 	return &session, nil
+}
+
+// Set 设置会话数据
+func (s *SessionStore) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	span, ctx := jaeger.StartSpanFromContext(ctx, "SessionStore.Set")
+	defer span.Finish()
+
+	// 序列化数据
+	data, err := json.Marshal(value)
+	if err != nil {
+		s.logger.Error(ctx, "failed to marshal session data",
+			types.Field{Key: "error", Value: err},
+			types.Field{Key: "key", Value: key})
+		return errors.NewError(codes.SerializationError, "failed to marshal session data", err)
+	}
+
+	// 保存会话数据
+	if err := s.store.Set(ctx, key, string(data), ttl); err != nil {
+		s.logger.Error(ctx, "failed to save session",
+			types.Field{Key: "key", Value: key},
+			types.Field{Key: "error", Value: err})
+		return err
+	}
+
+	return nil
 }

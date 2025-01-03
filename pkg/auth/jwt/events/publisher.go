@@ -3,10 +3,12 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 
+	"gobase/pkg/cache"
 	"gobase/pkg/client/redis"
 	"gobase/pkg/errors"
 	"gobase/pkg/logger/types"
@@ -20,6 +22,7 @@ type Publisher struct {
 	channel string
 	logger  types.Logger
 	metrics *metric.Counter
+	cache   cache.Cache
 }
 
 // Option 配置选项
@@ -29,6 +32,13 @@ type Option func(*Publisher)
 func WithMetrics(metrics *metric.Counter) Option {
 	return func(p *Publisher) {
 		p.metrics = metrics
+	}
+}
+
+// WithCache 设置缓存接口
+func WithCache(cache cache.Cache) Option {
+	return func(p *Publisher) {
+		p.cache = cache
 	}
 }
 
@@ -68,6 +78,18 @@ func (p *Publisher) Publish(ctx context.Context, eventType EventType, data map[s
 		return errors.NewSerializationError("failed to marshal event", err)
 	}
 
+	// 如果配置了缓存，先写入缓存
+	if p.cache != nil {
+		cacheKey := fmt.Sprintf("event:%s", event.ID)
+		if err := p.cache.Set(ctx, cacheKey, payload, time.Hour); err != nil {
+			p.logger.Warn(ctx, "failed to cache event",
+				types.Field{Key: "event_id", Value: event.ID},
+				types.Field{Key: "error", Value: err},
+			)
+			// 缓存失败不影响主流程
+		}
+	}
+
 	// 发布事件
 	if err := p.client.Publish(ctx, p.channel, string(payload)); err != nil {
 		p.logger.Error(ctx, "failed to publish event",
@@ -82,11 +104,6 @@ func (p *Publisher) Publish(ctx context.Context, eventType EventType, data map[s
 	if p.metrics != nil {
 		p.metrics.WithLabels("event_type", string(event.Type)).Inc()
 	}
-
-	p.logger.Debug(ctx, "event published",
-		types.Field{Key: "event_id", Value: event.ID},
-		types.Field{Key: "event_type", Value: string(event.Type)},
-	)
 
 	return nil
 }

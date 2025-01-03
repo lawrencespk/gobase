@@ -101,6 +101,9 @@ type Pipeline interface {
 	// 管道控制
 	Exec(ctx context.Context) ([]Cmder, error)
 	Close() error
+
+	// 过期时间操作
+	ExpireAt(ctx context.Context, key string, tm time.Time) (bool, error)
 }
 
 // PubSub 发布订阅接口

@@ -3,8 +3,10 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 
+	"gobase/pkg/cache"
 	"gobase/pkg/client/redis"
 	"gobase/pkg/errors"
 	"gobase/pkg/logger/types"
@@ -19,12 +21,20 @@ type Subscriber struct {
 	mu       sync.RWMutex
 	logger   types.Logger
 	metrics  *metric.Counter
+	cache    cache.Cache
 }
 
 // WithSubscriberLogger 设置日志记录器
 func WithSubscriberLogger(logger types.Logger) SubscriberOption {
 	return func(s *Subscriber) {
 		s.logger = logger
+	}
+}
+
+// WithSubscriberCache 设置缓存
+func WithSubscriberCache(cache cache.Cache) SubscriberOption {
+	return func(s *Subscriber) {
+		s.cache = cache
 	}
 }
 
@@ -52,11 +62,9 @@ func (s *Subscriber) RegisterHandler(eventType EventType, handler EventHandler) 
 
 // Subscribe 订阅事件
 func (s *Subscriber) Subscribe(ctx context.Context) error {
-	// 使用我们自己的redis客户端进行订阅
 	pubsub := s.client.Subscribe(ctx, s.channel)
 	defer pubsub.Close()
 
-	// 处理消息
 	for {
 		select {
 		case <-ctx.Done():
@@ -80,6 +88,26 @@ func (s *Subscriber) Subscribe(ctx context.Context) error {
 					s.metrics.WithLabels("type", "unknown", "status", "unmarshal_error").Inc()
 				}
 				continue
+			}
+
+			// 如果配置了缓存，尝试从缓存获取完整事件数据
+			if s.cache != nil {
+				cacheKey := fmt.Sprintf("event:%s", event.ID)
+				if cachedData, err := s.cache.Get(ctx, cacheKey); err == nil {
+					if data, ok := cachedData.([]byte); ok {
+						if err := json.Unmarshal(data, &event); err != nil {
+							s.logger.Warn(ctx, "failed to unmarshal cached event",
+								types.Field{Key: "event_id", Value: event.ID},
+								types.Field{Key: "error", Value: err},
+							)
+						}
+					} else {
+						s.logger.Warn(ctx, "invalid cache data type",
+							types.Field{Key: "event_id", Value: event.ID},
+							types.Field{Key: "type", Value: fmt.Sprintf("%T", cachedData)},
+						)
+					}
+				}
 			}
 
 			// 处理事件

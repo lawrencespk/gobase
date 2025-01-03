@@ -298,3 +298,12 @@ func (p *redisPipeline) Send(name string, args ...interface{}) {
 	cmd := p.newCommand(name, args)
 	p.addCommand(cmd)
 }
+
+// ExpireAt 设置键的过期时间
+func (p *redisPipeline) ExpireAt(ctx context.Context, key string, tm time.Time) (bool, error) {
+	span, ctx := jaeger.StartSpanFromContext(ctx, "Redis.Pipeline.ExpireAt")
+	defer span.Finish()
+
+	p.withPipelineOperation(ctx, "ExpireAt", p.pipeline.ExpireAt(ctx, key, tm))
+	return false, nil
+}

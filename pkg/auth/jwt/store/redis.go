@@ -2,142 +2,114 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
+	"gobase/pkg/auth/jwt"
 	"gobase/pkg/client/redis"
 	"gobase/pkg/errors"
-	"gobase/pkg/errors/codes"
 	"gobase/pkg/logger/types"
-	"gobase/pkg/monitor/prometheus/metric"
 	"gobase/pkg/trace/jaeger"
 )
 
-// RedisStore Redis存储实现
-type RedisStore struct {
-	client  redis.Client
-	prefix  string
-	logger  types.Logger
-	metrics *metric.Counter
+// RedisTokenStore Redis实现的Token存储
+type RedisTokenStore struct {
+	client redis.Client
+	prefix string
+	logger types.Logger
 }
 
-// NewRedisStore 创建Redis存储实例
-func NewRedisStore(opts Options, logger types.Logger) (*RedisStore, error) {
-	if opts.Redis == nil {
-		return nil, errors.NewError(codes.ConfigErrRequired, "redis options required", nil)
-	}
-
-	// 初始化Redis客户端
-	redisClient, err := redis.NewClient(redis.WithAddress(opts.Redis.Addr),
-		redis.WithPassword(opts.Redis.Password),
-		redis.WithDB(opts.Redis.DB))
-	if err != nil {
-		return nil, errors.NewError(codes.StoreErrCreate, "failed to create redis client", err)
-	}
-
-	store := &RedisStore{
-		client: redisClient,
-		prefix: opts.KeyPrefix,
+// NewRedisTokenStore 创建Redis Token存储实例
+func NewRedisTokenStore(client redis.Client, options *Options, logger types.Logger) *RedisTokenStore {
+	return &RedisTokenStore{
+		client: client,
+		prefix: options.KeyPrefix + "token:",
 		logger: logger,
 	}
-
-	// 初始化监控指标
-	if opts.EnableMetrics {
-		store.metrics = metric.NewCounter(metric.CounterOpts{
-			Namespace: "gobase",
-			Subsystem: "jwt_store",
-			Name:      "operations_total",
-			Help:      "Total number of JWT store operations",
-		})
-	}
-
-	return store, nil
 }
 
-// Set 存储JWT令牌
-func (s *RedisStore) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+// Set 存储Token信息
+func (s *RedisTokenStore) Set(ctx context.Context, token string, info *jwt.TokenInfo, expiration time.Duration) error {
 	span, ctx := jaeger.StartSpanFromContext(ctx, "store.redis.set")
 	if span != nil {
 		defer span.Finish()
 	}
 
-	if s.metrics != nil {
-		defer s.metrics.Inc()
-	}
-
-	key = s.prefix + key
-	err := s.client.Set(ctx, key, value, expiration)
+	// 序列化Token信息
+	data, err := json.Marshal(info)
 	if err != nil {
-		s.logger.WithFields(
-			types.Field{Key: "key", Value: key},
-			types.Field{Key: "error", Value: err},
-		).Error(ctx, "failed to set jwt token")
-		return errors.NewError(codes.StoreErrSet, "failed to set jwt token", err)
+		return errors.NewSerializationError("failed to marshal token info", err)
 	}
 
-	s.logger.WithFields(
-		types.Field{Key: "key", Value: key},
+	// 存储到Redis
+	key := s.prefix + token
+	if err := s.client.Set(ctx, key, string(data), expiration); err != nil {
+		s.logger.Error(ctx, "failed to store token",
+			types.Field{Key: "token", Value: token},
+			types.Field{Key: "error", Value: err},
+		)
+		return errors.NewCacheError("failed to store token", err)
+	}
+
+	s.logger.Debug(ctx, "token stored",
+		types.Field{Key: "token", Value: token},
 		types.Field{Key: "expiration", Value: expiration},
-	).Debug(ctx, "jwt token stored")
+	)
 
 	return nil
 }
 
-// Get 获取JWT令牌
-func (s *RedisStore) Get(ctx context.Context, key string) (string, error) {
+// Get 获取Token信息
+func (s *RedisTokenStore) Get(ctx context.Context, token string) (*jwt.TokenInfo, error) {
 	span, ctx := jaeger.StartSpanFromContext(ctx, "store.redis.get")
 	if span != nil {
 		defer span.Finish()
 	}
 
-	if s.metrics != nil {
-		defer s.metrics.Inc()
-	}
-
-	key = s.prefix + key
-	value, err := s.client.Get(ctx, key)
-	if err == redis.ErrNil {
-		return "", errors.NewError(codes.StoreErrNotFound, "token not found", err)
-	}
+	// 从Redis获取
+	key := s.prefix + token
+	data, err := s.client.Get(ctx, key)
 	if err != nil {
-		s.logger.WithFields(
-			types.Field{Key: "key", Value: key},
-			types.Field{Key: "error", Value: err},
-		).Error(ctx, "failed to get jwt token")
-		return "", errors.NewError(codes.StoreErrGet, "failed to get jwt token", err)
+		if errors.Is(err, redis.ErrNil) {
+			return nil, errors.NewRedisKeyNotFoundError("token not found", err)
+		}
+		return nil, errors.NewCacheError("failed to get token", err)
 	}
 
-	return value, nil
+	// 反序列化Token信息
+	var info jwt.TokenInfo
+	if err := json.Unmarshal([]byte(data), &info); err != nil {
+		return nil, errors.NewSerializationError("failed to unmarshal token info", err)
+	}
+
+	return &info, nil
 }
 
-// Delete 删除JWT令牌
-func (s *RedisStore) Delete(ctx context.Context, key string) error {
+// Delete 删除Token信息
+func (s *RedisTokenStore) Delete(ctx context.Context, token string) error {
 	span, ctx := jaeger.StartSpanFromContext(ctx, "store.redis.delete")
 	if span != nil {
 		defer span.Finish()
 	}
 
-	if s.metrics != nil {
-		defer s.metrics.Inc()
-	}
-
-	key = s.prefix + key
+	key := s.prefix + token
 	_, err := s.client.Del(ctx, key)
 	if err != nil {
-		s.logger.WithFields(
-			types.Field{Key: "key", Value: key},
+		s.logger.Error(ctx, "failed to delete token",
+			types.Field{Key: "token", Value: token},
 			types.Field{Key: "error", Value: err},
-		).Error(ctx, "failed to delete jwt token")
-		return errors.NewError(codes.StoreErrDelete, "failed to delete jwt token", err)
+		)
+		return errors.NewCacheError("failed to delete token", err)
 	}
 
-	s.logger.WithFields(
-		types.Field{Key: "key", Value: key},
-	).Debug(ctx, "jwt token deleted")
+	s.logger.Debug(ctx, "token deleted",
+		types.Field{Key: "token", Value: token},
+	)
 
 	return nil
 }
 
 // Close 关闭存储连接
-func (s *RedisStore) Close() error {
+func (s *RedisTokenStore) Close() error {
 	return s.client.Close()
 }

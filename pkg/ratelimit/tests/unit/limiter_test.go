@@ -96,6 +96,12 @@ func (m *MockPipeline) ZRem(ctx context.Context, key string, members ...interfac
 	return args.Get(0).(int64), args.Error(1)
 }
 
+// ExpireAt 实现 ExpireAt 方法
+func (m *MockPipeline) ExpireAt(ctx context.Context, key string, tm time.Time) (bool, error) {
+	args := m.Called(ctx, key, tm)
+	return args.Bool(0), args.Error(1)
+}
+
 // MockRedisClient 模拟Redis客户端
 type MockRedisClient struct {
 	mock.Mock
