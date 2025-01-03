@@ -41,6 +41,12 @@ type cacheShard struct {
 	data sync.Map
 }
 
+var itemPool = sync.Pool{
+	New: func() interface{} {
+		return &cacheItem{}
+	},
+}
+
 // NewCache 创建内存缓存
 func NewCache(config *Config, logger types.Logger) (*Cache, error) {
 	if err := config.Validate(); err != nil {
@@ -84,31 +90,29 @@ func (c *Cache) getShard(key string) *cacheShard {
 // Get 获取缓存数据
 func (c *Cache) Get(ctx context.Context, key string) (interface{}, error) {
 	shard := c.getShard(key)
-	value, ok := shard.data.Load(key)
-	if !ok {
-		c.metrics.WithLabels("get", "miss").Inc()
-		return nil, errors.NewCacheNotFoundError("cache miss", nil)
-	}
-
-	item := value.(*cacheItem)
-	if item.isExpired() {
-		shard.data.Delete(key)
-		atomic.AddInt64(&c.count, -1)
+	if value, ok := shard.data.Load(key); ok {
+		item := value.(*cacheItem)
+		if !item.isExpired() {
+			c.metrics.WithLabels("get", "hit").Inc()
+			return item.value, nil
+		}
+		// 使用 LoadAndDelete 替代 Delete,确保原子性
+		if _, loaded := shard.data.LoadAndDelete(key); loaded {
+			atomic.AddInt64(&c.count, -1)
+		}
 		c.metrics.WithLabels("get", "expired").Inc()
 		return nil, errors.NewCacheExpiredError("cache expired", nil)
 	}
-
-	c.metrics.WithLabels("get", "hit").Inc()
-	return item.value, nil
+	c.metrics.WithLabels("get", "miss").Inc()
+	return nil, errors.NewCacheNotFoundError("cache miss", nil)
 }
 
 // Set 设置缓存数据
 func (c *Cache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	shard := c.getShard(key)
-	item := &cacheItem{
-		value:      value,
-		expiration: time.Now().Add(ttl),
-	}
+	item := itemPool.Get().(*cacheItem)
+	item.value = value
+	item.expiration = time.Now().Add(ttl)
 
 	// 使用 LoadOrStore 保证原子性
 	for {
