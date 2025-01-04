@@ -136,3 +136,15 @@ func (r *RSA) Verify(data []byte, signature []byte, key interface{}) error {
 func (r *RSA) Name() jwt.SigningMethod {
 	return r.method
 }
+
+// CreateAlgorithm 根据签名方法创建相应的算法实例
+func CreateAlgorithm(method jwt.SigningMethod) (Algorithm, error) {
+	switch method {
+	case jwt.HS256, jwt.HS384, jwt.HS512:
+		return NewHMAC(method)
+	case jwt.RS256, jwt.RS384, jwt.RS512:
+		return NewRSA(method)
+	default:
+		return nil, errors.NewAlgorithmMismatchError("unsupported signing method", nil)
+	}
+}

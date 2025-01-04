@@ -41,46 +41,46 @@ func (km *KeyManager) InitializeKeys(ctx context.Context, config *jwt.KeyConfig)
 	km.mutex.Lock()
 	defer km.mutex.Unlock()
 
-	switch km.method {
-	case jwt.HS256, jwt.HS384, jwt.HS512:
-		if config.SecretKey == "" {
+	switch km.algorithm.(type) {
+	case *HMAC:
+		if config == nil || config.SecretKey == "" {
 			return errors.NewKeyInvalidError("secret key is required for HMAC", nil)
 		}
 		km.keyPair = &jwt.KeyPair{
 			PrivateKey: []byte(config.SecretKey),
 			PublicKey:  []byte(config.SecretKey),
 		}
+		return nil
 
-	case jwt.RS256, jwt.RS384, jwt.RS512:
-		if config.PrivateKey == "" || config.PublicKey == "" {
-			// 生成新的RSA密钥对
-			privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-			if err != nil {
-				return errors.NewKeyInvalidError("failed to generate RSA key pair", err)
-			}
+	case *RSA:
+		var privateKey *rsa.PrivateKey
+		var publicKey *rsa.PublicKey
+		var err error
 
-			km.keyPair = &jwt.KeyPair{
-				PrivateKey: privateKey,
-				PublicKey:  &privateKey.PublicKey,
-			}
-
-			// 记录日志
-			km.logger.Info(ctx, "generated new RSA key pair")
-		} else {
-			// 解析已有的密钥对
-			privateKey, publicKey, err := parseRSAKeyPair(config.PrivateKey, config.PublicKey)
+		if config != nil && config.PrivateKey != "" {
+			// 使用提供的密钥
+			privateKey, publicKey, err = parseRSAKeyPair(ctx, km.logger, config.PrivateKey)
 			if err != nil {
 				return err
 			}
-
-			km.keyPair = &jwt.KeyPair{
-				PrivateKey: privateKey,
-				PublicKey:  publicKey,
+		} else {
+			// 自动生成密钥对
+			privateKey, err = rsa.GenerateKey(rand.Reader, 2048)
+			if err != nil {
+				return errors.NewKeyInvalidError("failed to generate RSA key pair", err)
 			}
+			publicKey = &privateKey.PublicKey
 		}
-	}
 
-	return nil
+		km.keyPair = &jwt.KeyPair{
+			PrivateKey: privateKey,
+			PublicKey:  publicKey,
+		}
+		return nil
+
+	default:
+		return errors.NewKeyInvalidError("unsupported algorithm", nil)
+	}
 }
 
 // GetSigningKey 获取签名密钥
@@ -107,30 +107,33 @@ func (km *KeyManager) GetVerificationKey() (interface{}, error) {
 	return km.keyPair.PublicKey, nil
 }
 
-// RotateKeys 轮换密钥
+// RotateKeys 轮转密钥
 func (km *KeyManager) RotateKeys(ctx context.Context) error {
 	km.mutex.Lock()
 	defer km.mutex.Unlock()
 
+	// 先检查方法类型
 	switch km.method {
+	case jwt.HS256, jwt.HS384, jwt.HS512:
+		return errors.NewKeyInvalidError("key rotation not supported for HMAC", nil)
 	case jwt.RS256, jwt.RS384, jwt.RS512:
+		// 检查密钥对是否已初始化
+		if km.keyPair == nil {
+			return errors.NewKeyInvalidError("key pair not initialized", nil)
+		}
+		// 生成新的 RSA 密钥对
 		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			return errors.NewKeyInvalidError("failed to generate RSA key pair", err)
 		}
-
 		km.keyPair = &jwt.KeyPair{
 			PrivateKey: privateKey,
 			PublicKey:  &privateKey.PublicKey,
 		}
-
-		km.logger.Info(ctx, "rotated RSA key pair")
-
+		return nil
 	default:
-		return errors.NewAlgorithmMismatchError("key rotation not supported for this method", nil)
+		return errors.NewAlgorithmMismatchError("unsupported signing method", nil)
 	}
-
-	return nil
 }
 
 // 辅助函数
@@ -146,28 +149,65 @@ func createAlgorithm(method jwt.SigningMethod) (Algorithm, error) {
 	}
 }
 
-func parseRSAKeyPair(privateKeyPEM, publicKeyPEM string) (*rsa.PrivateKey, *rsa.PublicKey, error) {
-	// 解析私钥
+func parseRSAKeyPair(ctx context.Context, logger types.Logger, privateKeyPEM string) (*rsa.PrivateKey, *rsa.PublicKey, error) {
+	// 1. 验证 PEM 内容是否为空
+	if len(privateKeyPEM) == 0 {
+		logger.Error(ctx, "empty PEM content")
+		return nil, nil, errors.NewKeyInvalidError("empty PEM content", nil)
+	}
+
+	// 2. 解码 PEM
 	block, _ := pem.Decode([]byte(privateKeyPEM))
 	if block == nil {
-		return nil, nil, errors.NewKeyInvalidError("failed to parse private key PEM", nil)
+		logger.Error(ctx, "failed to decode PEM block")
+		return nil, nil, errors.NewKeyInvalidError("failed to decode PEM block", nil)
 	}
 
-	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, nil, errors.NewKeyInvalidError("failed to parse private key", err)
+	logger.Debug(ctx, "decoded PEM block",
+		types.Field{Key: "type", Value: block.Type},
+		types.Field{Key: "bytes_length", Value: len(block.Bytes)})
+
+	// 3. 解析私钥
+	var privateKey *rsa.PrivateKey
+	var err error
+
+	if block.Type == "RSA PRIVATE KEY" {
+		// 处理 PKCS1 格式
+		privateKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			logger.Error(ctx, "failed to parse PKCS1 private key",
+				types.Field{Key: "error", Value: err.Error()})
+			return nil, nil, errors.NewKeyInvalidError("failed to parse private key", err)
+		}
+	} else if block.Type == "PRIVATE KEY" {
+		// 处理 PKCS8 格式
+		key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			logger.Error(ctx, "failed to parse PKCS8 private key",
+				types.Field{Key: "error", Value: err.Error()})
+			return nil, nil, errors.NewKeyInvalidError("failed to parse private key", err)
+		}
+		var ok bool
+		privateKey, ok = key.(*rsa.PrivateKey)
+		if !ok {
+			logger.Error(ctx, "parsed key is not an RSA private key")
+			return nil, nil, errors.NewKeyInvalidError("parsed key is not an RSA private key", nil)
+		}
+	} else {
+		logger.Error(ctx, "unsupported private key type",
+			types.Field{Key: "type", Value: block.Type})
+		return nil, nil, errors.NewKeyInvalidError("unsupported private key type", nil)
 	}
 
-	// 解析公钥
-	block, _ = pem.Decode([]byte(publicKeyPEM))
-	if block == nil {
-		return nil, nil, errors.NewKeyInvalidError("failed to parse public key PEM", nil)
+	// 4. 验证密钥
+	if err := privateKey.Validate(); err != nil {
+		logger.Error(ctx, "invalid RSA private key",
+			types.Field{Key: "error", Value: err.Error()})
+		return nil, nil, errors.NewKeyInvalidError("invalid RSA private key", err)
 	}
 
-	publicKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
-	if err != nil {
-		return nil, nil, errors.NewKeyInvalidError("failed to parse public key", err)
-	}
+	logger.Debug(ctx, "successfully parsed RSA key pair",
+		types.Field{Key: "modulus_size", Value: privateKey.N.BitLen()})
 
-	return privateKey, publicKey, nil
+	return privateKey, &privateKey.PublicKey, nil
 }
