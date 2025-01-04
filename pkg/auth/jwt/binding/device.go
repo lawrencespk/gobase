@@ -54,16 +54,13 @@ func NewDeviceValidator(store Store) (*DeviceValidator, error) {
 		return nil, errors.Wrap(err, "failed to create logger")
 	}
 
-	// 创建业务指标收集器
-	metrics := collector.NewBusinessCollector("gobase_auth")
-	if err := metrics.Register(); err != nil {
-		return nil, errors.Wrap(err, "failed to register metrics collector")
-	}
+	// 只初始化 metrics，不再尝试注册
+	InitMetrics()
 
 	return &DeviceValidator{
 		store:   store,
 		logger:  log,
-		metrics: metrics,
+		metrics: GetCollector(),
 	}, nil
 }
 
