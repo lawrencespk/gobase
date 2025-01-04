@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 	"gobase/pkg/monitor/prometheus/metric"
 )
 
@@ -105,4 +107,102 @@ func (bl *MemoryBlacklist) Collect(ch chan<- metric.Metric) {
 	bl.addTotal.Collect(ch)
 	bl.hitTotal.Collect(ch)
 	bl.missTotal.Collect(ch)
+}
+
+// MemoryStore 基于内存的存储实现
+type MemoryStore struct {
+	*MemoryBlacklist
+}
+
+// NewMemoryStore 创建内存存储实例
+func NewMemoryStore() Store {
+	bl, err := NewMemoryBlacklist(DefaultOptions())
+	if err != nil {
+		// 由于这是内部初始化，使用默认选项不应该出错
+		// 如果出错，说明是严重的系统问题，应该panic
+		panic(err)
+	}
+	store := &MemoryStore{
+		MemoryBlacklist: bl,
+	}
+
+	// 启动定期清理任务
+	go func() {
+		ticker := time.NewTicker(bl.opts.CleanupInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			store.Cleanup()
+		}
+	}()
+
+	return store
+}
+
+// BlacklistItem 存储黑名单项的详细信息
+type BlacklistItem struct {
+	Reason     string
+	ExpireTime time.Time
+}
+
+// Add 添加token到黑名单
+func (s *MemoryStore) Add(ctx context.Context, tokenID, reason string, expiration time.Duration) error {
+	if tokenID == "" {
+		return errors.NewError(codes.InvalidParams, "token ID is required", nil)
+	}
+	if expiration <= 0 {
+		return errors.NewError(codes.InvalidParams, "expiration must be positive", nil)
+	}
+	s.MemoryBlacklist.tokens.Store(tokenID, BlacklistItem{
+		Reason:     reason,
+		ExpireTime: time.Now().Add(expiration),
+	})
+	s.MemoryBlacklist.tokenCount.Inc()
+	s.MemoryBlacklist.addTotal.Inc()
+	return nil
+}
+
+// Get 获取黑名单原因
+func (s *MemoryStore) Get(ctx context.Context, tokenID string) (string, error) {
+	if tokenID == "" {
+		return "", errors.NewError(codes.InvalidParams, "token ID is required", nil)
+	}
+
+	if value, ok := s.MemoryBlacklist.tokens.Load(tokenID); ok {
+		item := value.(BlacklistItem)
+		if time.Now().Before(item.ExpireTime) {
+			return item.Reason, nil // 返回用户定义的原因
+		}
+		// token已过期,从黑名单中移除
+		s.MemoryBlacklist.tokens.Delete(tokenID)
+		s.MemoryBlacklist.tokenCount.Dec()
+	}
+	return "", errors.NewError(codes.StoreErrNotFound, "token not found in blacklist", nil)
+}
+
+// Remove 从黑名单中移除
+func (s *MemoryStore) Remove(ctx context.Context, tokenID string) error {
+	if tokenID == "" {
+		return errors.NewError(codes.InvalidParams, "token ID is required", nil)
+	}
+	s.MemoryBlacklist.tokens.Delete(tokenID)
+	s.MemoryBlacklist.tokenCount.Dec()
+	return nil
+}
+
+// Close 关闭存储
+func (s *MemoryStore) Close() error {
+	return nil
+}
+
+// Cleanup 清理过期的token
+func (s *MemoryStore) Cleanup() {
+	now := time.Now()
+	s.tokens.Range(func(key, value interface{}) bool {
+		item := value.(BlacklistItem)
+		if now.After(item.ExpireTime) {
+			s.tokens.Delete(key)
+			s.tokenCount.Dec()
+		}
+		return true
+	})
 }

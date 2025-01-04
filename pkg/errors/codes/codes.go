@@ -226,4 +226,5 @@ const (
 	StoreErrGet      = "3402" // 存储获取错误
 	StoreErrDelete   = "3403" // 存储删除错误
 	StoreErrNotFound = "3404" // 存储数据不存在
+	StoreErrAdd      = "3405" // 存储添加错误
 )
