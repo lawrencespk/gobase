@@ -80,19 +80,21 @@ func (p *Publisher) Publish(ctx context.Context, eventType EventType, data map[s
 
 	// 如果配置了缓存，先写入缓存
 	if p.cache != nil {
-		cacheKey := fmt.Sprintf("event:%s", event.ID)
-		if err := p.cache.Set(ctx, cacheKey, payload, time.Hour); err != nil {
-			p.logger.Warn(ctx, "failed to cache event",
-				types.Field{Key: "event_id", Value: event.ID},
-				types.Field{Key: "error", Value: err},
-			)
-			// 缓存失败不影响主流程
+		if p.cache.GetLevel() >= cache.Level(2) {
+			cacheKey := fmt.Sprintf("event:%s", event.ID)
+			if err := p.cache.Set(ctx, cacheKey, payload, time.Hour); err != nil {
+				p.logger.WithContext(ctx).WithCaller(1).Warn(ctx, "failed to cache event",
+					types.Field{Key: "event_id", Value: event.ID},
+					types.Field{Key: "error", Value: err},
+				)
+				// 缓存失败不影响主流程
+			}
 		}
 	}
 
 	// 发布事件
 	if err := p.client.Publish(ctx, p.channel, string(payload)); err != nil {
-		p.logger.Error(ctx, "failed to publish event",
+		p.logger.WithContext(ctx).WithCaller(1).Error(ctx, "failed to publish event",
 			types.Field{Key: "event_id", Value: event.ID},
 			types.Field{Key: "event_type", Value: string(event.Type)},
 			types.Field{Key: "error", Value: err},
@@ -100,9 +102,15 @@ func (p *Publisher) Publish(ctx context.Context, eventType EventType, data map[s
 		return errors.NewThirdPartyError("failed to publish event to redis", err)
 	}
 
+	// 记录成功日志
+	p.logger.WithContext(ctx).WithCaller(1).Info(ctx, "event published successfully",
+		types.Field{Key: "event_id", Value: event.ID},
+		types.Field{Key: "event_type", Value: string(event.Type)},
+	)
+
 	// 记录指标
 	if p.metrics != nil {
-		p.metrics.WithLabels("event_type", string(event.Type)).Inc()
+		p.metrics.WithLabelValues(string(event.Type), "success").Inc()
 	}
 
 	return nil

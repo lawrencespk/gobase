@@ -22,6 +22,7 @@ type Subscriber struct {
 	logger   types.Logger
 	metrics  *metric.Counter
 	cache    cache.Cache
+	wg       sync.WaitGroup
 }
 
 // WithSubscriberLogger 设置日志记录器
@@ -63,86 +64,117 @@ func (s *Subscriber) RegisterHandler(eventType EventType, handler EventHandler) 
 // Subscribe 订阅事件
 func (s *Subscriber) Subscribe(ctx context.Context) error {
 	pubsub := s.client.Subscribe(ctx, s.channel)
-	defer pubsub.Close()
+	if pubsub == nil {
+		return errors.NewRedisCommandError("failed to create subscription", nil)
+	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-			msg, err := pubsub.ReceiveMessage(ctx)
-			if err != nil {
-				return errors.NewRedisCommandError("failed to receive message", err)
+	s.wg.Add(1)
+	// 在协程中处理消息
+	go func() {
+		defer s.wg.Done()
+		defer func() {
+			if err := pubsub.Close(); err != nil && s.logger != nil {
+				s.logger.Error(ctx, "failed to close pubsub",
+					types.Field{Key: "error", Value: err},
+				)
 			}
+		}()
 
-			// 解析事件
-			var event Event
-			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
-				if s.logger != nil {
-					s.logger.Error(ctx, "failed to unmarshal event",
-						types.Field{Key: "error", Value: err},
-						types.Field{Key: "payload", Value: msg.Payload},
-					)
-				}
-				if s.metrics != nil {
-					s.metrics.WithLabels("type", "unknown", "status", "unmarshal_error").Inc()
-				}
-				continue
-			}
-
-			// 如果配置了缓存，尝试从缓存获取完整事件数据
-			if s.cache != nil {
-				cacheKey := fmt.Sprintf("event:%s", event.ID)
-				if cachedData, err := s.cache.Get(ctx, cacheKey); err == nil {
-					if data, ok := cachedData.([]byte); ok {
-						if err := json.Unmarshal(data, &event); err != nil {
-							s.logger.Warn(ctx, "failed to unmarshal cached event",
-								types.Field{Key: "event_id", Value: event.ID},
-								types.Field{Key: "error", Value: err},
-							)
-						}
-					} else {
-						s.logger.Warn(ctx, "invalid cache data type",
-							types.Field{Key: "event_id", Value: event.ID},
-							types.Field{Key: "type", Value: fmt.Sprintf("%T", cachedData)},
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				msg, err := pubsub.ReceiveMessage(ctx)
+				if err != nil {
+					if err == context.Canceled {
+						return
+					}
+					if s.logger != nil {
+						s.logger.Error(ctx, "failed to receive message",
+							types.Field{Key: "error", Value: err},
 						)
 					}
+					continue
 				}
-			}
 
-			// 处理事件
-			s.mu.RLock()
-			handler, exists := s.handlers[event.Type]
-			s.mu.RUnlock()
-
-			if !exists {
-				if s.logger != nil {
-					s.logger.Warn(ctx, "no handler registered for event type",
-						types.Field{Key: "event_type", Value: event.Type},
-					)
+				// 解析事件
+				var event Event
+				if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
+					if s.logger != nil {
+						s.logger.Error(ctx, "failed to unmarshal event",
+							types.Field{Key: "error", Value: err},
+							types.Field{Key: "payload", Value: msg.Payload},
+						)
+					}
+					if s.metrics != nil {
+						s.metrics.WithLabels("type", "unknown", "status", "unmarshal_error").Inc()
+					}
+					continue
 				}
+
+				// 如果配置了缓存，尝试从缓存获取完整事件数据
+				if s.cache != nil {
+					cacheKey := fmt.Sprintf("event:%s", event.ID)
+					if cachedData, err := s.cache.Get(ctx, cacheKey); err == nil {
+						if data, ok := cachedData.([]byte); ok {
+							if err := json.Unmarshal(data, &event); err != nil {
+								s.logger.Warn(ctx, "failed to unmarshal cached event",
+									types.Field{Key: "event_id", Value: event.ID},
+									types.Field{Key: "error", Value: err},
+								)
+							}
+						} else {
+							s.logger.Warn(ctx, "invalid cache data type",
+								types.Field{Key: "event_id", Value: event.ID},
+								types.Field{Key: "type", Value: fmt.Sprintf("%T", cachedData)},
+							)
+						}
+					}
+				}
+
+				// 处理事件
+				s.mu.RLock()
+				handler, exists := s.handlers[event.Type]
+				s.mu.RUnlock()
+
+				if !exists {
+					if s.logger != nil {
+						s.logger.Warn(ctx, "no handler registered for event type",
+							types.Field{Key: "event_type", Value: event.Type},
+						)
+					}
+					if s.metrics != nil {
+						s.metrics.WithLabels("type", string(event.Type), "status", "no_handler").Inc()
+					}
+					continue
+				}
+
+				if err := handler(&event); err != nil {
+					if s.logger != nil {
+						s.logger.Error(ctx, "failed to handle event",
+							types.Field{Key: "event_type", Value: event.Type},
+							types.Field{Key: "error", Value: err},
+						)
+					}
+					if s.metrics != nil {
+						s.metrics.WithLabels("type", string(event.Type), "status", "error").Inc()
+					}
+					continue
+				}
+
 				if s.metrics != nil {
-					s.metrics.WithLabels("type", string(event.Type), "status", "no_handler").Inc()
+					s.metrics.WithLabels("type", string(event.Type), "status", "success").Inc()
 				}
-				continue
-			}
-
-			if err := handler(&event); err != nil {
-				if s.logger != nil {
-					s.logger.Error(ctx, "failed to handle event",
-						types.Field{Key: "event_type", Value: event.Type},
-						types.Field{Key: "error", Value: err},
-					)
-				}
-				if s.metrics != nil {
-					s.metrics.WithLabels("type", string(event.Type), "status", "error").Inc()
-				}
-				continue
-			}
-
-			if s.metrics != nil {
-				s.metrics.WithLabels("type", string(event.Type), "status", "success").Inc()
 			}
 		}
-	}
+	}()
+
+	return nil
+}
+
+// Close 关闭订阅者
+func (s *Subscriber) Close() error {
+	s.wg.Wait()
+	return nil
 }
