@@ -54,3 +54,7 @@ Thumbs.db
 
 # todo files
 .todo
+
+# Document files
+.Document
+
