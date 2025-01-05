@@ -87,3 +87,56 @@ func NewJWTMetrics() *JWTMetrics {
 
 	return m
 }
+
+// NewTokenMetrics 创建新的 JWT 指标收集器
+func NewTokenMetrics() *JWTMetrics {
+	m := &JWTMetrics{
+		TokenAgeGauge: metric.NewGauge(metric.GaugeOpts{
+			Namespace: "jwt",
+			Name:      "token_age_seconds",
+			Help:      "Token age in seconds",
+		}),
+		TokenReuseIntervalGauge: metric.NewGauge(metric.GaugeOpts{
+			Namespace: "jwt",
+			Name:      "token_reuse_interval_seconds",
+			Help:      "Token reuse interval in seconds",
+		}),
+		TokenErrors: metric.NewCounter(metric.CounterOpts{
+			Namespace: "jwt",
+			Name:      "token_errors_total",
+			Help:      "Total number of token errors",
+		}).WithLabels("operation", "reason"),
+	}
+
+	// 注册所有指标
+	if err := m.registerMetrics(); err != nil {
+		panic(err)
+	}
+	return m
+}
+
+// registerMetrics 注册所有指标
+func (m *JWTMetrics) registerMetrics() error {
+	// 注册 TokenAgeGauge
+	if err := m.TokenAgeGauge.Register(); err != nil {
+		if err.Error() != "duplicate metrics collector registration attempted" {
+			return err
+		}
+	}
+
+	// 注册 TokenReuseIntervalGauge
+	if err := m.TokenReuseIntervalGauge.Register(); err != nil {
+		if err.Error() != "duplicate metrics collector registration attempted" {
+			return err
+		}
+	}
+
+	// 注册 TokenErrors
+	if err := m.TokenErrors.Register(); err != nil {
+		if err.Error() != "duplicate metrics collector registration attempted" {
+			return err
+		}
+	}
+
+	return nil
+}
