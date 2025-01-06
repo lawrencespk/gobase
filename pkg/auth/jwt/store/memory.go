@@ -83,9 +83,9 @@ func NewMemoryStore(opts Options) (*MemoryStore, error) {
 	return store, nil
 }
 
-// Save 保存Token信息
-func (s *MemoryStore) Save(ctx context.Context, token string, tokenInfo *jwt.TokenInfo) error {
-	span, ctx := jaeger.StartSpanFromContext(ctx, "store.memory.save")
+// Set 存储Token信息
+func (s *MemoryStore) Set(ctx context.Context, token string, tokenInfo *jwt.TokenInfo, expiration time.Duration) error {
+	span, ctx := jaeger.StartSpanFromContext(ctx, "store.memory.set")
 	if span != nil {
 		defer span.Finish()
 	}
@@ -94,9 +94,18 @@ func (s *MemoryStore) Save(ctx context.Context, token string, tokenInfo *jwt.Tok
 	defer func() {
 		duration := time.Since(start).Seconds()
 		if s.metrics != nil {
-			s.metrics.ObserveOperation("save", duration, nil)
+			s.metrics.ObserveOperation("set", duration, nil)
 		}
 	}()
+
+	// 添加对 nil tokenInfo 的检查
+	if tokenInfo == nil {
+		s.logger.WithFields(types.Field{
+			Key:   "token",
+			Value: token,
+		}).Error(ctx, "attempt to save nil token info")
+		return errors.NewTokenInvalidError("token info cannot be nil", nil)
+	}
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -107,7 +116,7 @@ func (s *MemoryStore) Save(ctx context.Context, token string, tokenInfo *jwt.Tok
 			Key:   "token",
 			Value: token,
 		}).Warn(ctx, "token already expired")
-		return errors.NewRedisKeyExpiredError("token expired", nil)
+		return errors.NewTokenExpiredError("token expired", nil)
 	}
 
 	// 保存Token信息
@@ -123,7 +132,8 @@ func (s *MemoryStore) Save(ctx context.Context, token string, tokenInfo *jwt.Tok
 	s.logger.WithFields(
 		types.Field{Key: "token", Value: token},
 		types.Field{Key: "user_id", Value: userID},
-	).Debug(ctx, "token info saved")
+		types.Field{Key: "expires_at", Value: tokenInfo.ExpiresAt},
+	).Debug(ctx, "token saved")
 
 	return nil
 }
@@ -138,23 +148,23 @@ func (s *MemoryStore) Get(ctx context.Context, token string) (*jwt.TokenInfo, er
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	tokenInfo, exists := s.tokens[token]
+	info, exists := s.tokens[token]
 	if !exists {
 		s.logger.WithFields(
 			types.Field{Key: "token", Value: token},
 		).Debug(ctx, "token not found")
-		return nil, errors.NewRedisKeyNotFoundError("token not found", nil)
+		return nil, errors.NewStoreNotFoundError("token not found", nil)
 	}
 
 	// 检查Token是否已过期
-	if time.Now().After(tokenInfo.ExpiresAt) {
+	if time.Now().After(info.ExpiresAt) {
 		s.logger.WithFields(
 			types.Field{Key: "token", Value: token},
 		).Debug(ctx, "token expired")
-		return nil, errors.NewRedisKeyExpiredError("token expired", nil)
+		return nil, errors.NewTokenExpiredError("token expired", nil)
 	}
 
-	return tokenInfo, nil
+	return info, nil
 }
 
 // Delete 删除Token信息
@@ -172,7 +182,7 @@ func (s *MemoryStore) Delete(ctx context.Context, token string) error {
 		s.logger.WithFields(
 			types.Field{Key: "token", Value: token},
 		).Debug(ctx, "token not found when deleting")
-		return nil
+		return errors.NewStoreNotFoundError("token not found", nil)
 	}
 
 	// 从用户Token映射中删除

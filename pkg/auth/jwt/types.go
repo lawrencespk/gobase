@@ -1,6 +1,8 @@
 package jwt
 
 import (
+	"encoding/json"
+	"gobase/pkg/errors"
 	"time"
 )
 
@@ -17,15 +19,78 @@ const (
 // TokenInfo 存储Token的基本信息
 type TokenInfo struct {
 	// Token的原始字符串
-	Raw string
+	Raw string `json:"raw"`
 	// Token类型
-	Type TokenType
+	Type TokenType `json:"type"`
 	// Token的Claims
-	Claims Claims
+	Claims Claims `json:"-"` // 不直接序列化接口
 	// 过期时间
-	ExpiresAt time.Time
+	ExpiresAt time.Time `json:"expires_at"`
 	// 是否已被吊销
-	IsRevoked bool
+	IsRevoked bool `json:"is_revoked"`
+}
+
+// MarshalJSON 自定义JSON序列化方法
+func (t *TokenInfo) MarshalJSON() ([]byte, error) {
+	type Alias TokenInfo
+	aux := &struct {
+		*Alias
+		Claims map[string]interface{} `json:"claims"`
+	}{
+		Alias: (*Alias)(t),
+	}
+
+	// 将 Claims 序列化为 map
+	if t.Claims != nil {
+		claimsData, err := json.Marshal(t.Claims)
+		if err != nil {
+			return nil, errors.NewSerializationError("failed to marshal claims", err)
+		}
+
+		var claimsMap map[string]interface{}
+		if err := json.Unmarshal(claimsData, &claimsMap); err != nil {
+			return nil, errors.NewSerializationError("failed to unmarshal claims to map", err)
+		}
+		aux.Claims = claimsMap
+	}
+
+	return json.Marshal(aux)
+}
+
+// UnmarshalJSON 自定义JSON反序列化方法
+func (t *TokenInfo) UnmarshalJSON(data []byte) error {
+	type Alias TokenInfo
+	aux := &struct {
+		*Alias
+		Claims map[string]interface{} `json:"claims"`
+	}{
+		Alias: (*Alias)(t),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return errors.NewSerializationError("failed to unmarshal token info", err)
+	}
+
+	// 将 map 转换回 Claims
+	if aux.Claims != nil {
+		claimsData, err := json.Marshal(aux.Claims)
+		if err != nil {
+			return errors.NewSerializationError("failed to marshal claims map", err)
+		}
+
+		// 先尝试解析为 StandardClaims
+		var stdClaims StandardClaims
+		if err := json.Unmarshal(claimsData, &stdClaims); err == nil {
+			t.Claims = &stdClaims
+			return nil
+		}
+
+		// 如果不是 StandardClaims，保持原始数据
+		// 具体类型的解析由调用者处理
+		t.Claims = nil
+	}
+
+	return nil
 }
 
 // TokenPair 包含访问令牌和刷新令牌

@@ -48,7 +48,7 @@ func (s *RedisTokenStore) Set(ctx context.Context, token string, info *jwt.Token
 			types.Field{Key: "token", Value: token},
 			types.Field{Key: "error", Value: err},
 		)
-		return errors.NewCacheError("failed to store token", err)
+		return errors.NewRedisCommandError("failed to store token", err)
 	}
 
 	s.logger.Debug(ctx, "token stored",
@@ -70,10 +70,10 @@ func (s *RedisTokenStore) Get(ctx context.Context, token string) (*jwt.TokenInfo
 	key := s.prefix + token
 	data, err := s.client.Get(ctx, key)
 	if err != nil {
-		if errors.Is(err, redis.ErrNil) {
-			return nil, errors.NewRedisKeyNotFoundError("token not found", err)
+		if err == redis.ErrNil {
+			return nil, err
 		}
-		return nil, errors.NewCacheError("failed to get token", err)
+		return nil, errors.NewRedisCommandError("failed to get token", err)
 	}
 
 	// 反序列化Token信息
@@ -99,7 +99,7 @@ func (s *RedisTokenStore) Delete(ctx context.Context, token string) error {
 			types.Field{Key: "token", Value: token},
 			types.Field{Key: "error", Value: err},
 		)
-		return errors.NewCacheError("failed to delete token", err)
+		return errors.NewRedisCommandError("failed to delete token", err)
 	}
 
 	s.logger.Debug(ctx, "token deleted",
