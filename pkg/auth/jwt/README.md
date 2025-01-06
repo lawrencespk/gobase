@@ -26,3 +26,6 @@
 ## 9. Store 包
 - [相关文档](store/README.md)
 
+## 10. Sync 包
+- [相关文档](sync/README.md)
+
