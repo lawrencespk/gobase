@@ -6,19 +6,20 @@ import (
 	"time"
 )
 
-// Store 会话存储接口
+// Store 定义了会话存储的接口
 type Store interface {
-	// Get 获取会话数据
-	Get(ctx context.Context, key string) (string, error)
-
-	// Set 设置会话数据
-	Set(ctx context.Context, key string, value string, expiration time.Duration) error
-
-	// Delete 删除会话数据
-	Delete(ctx context.Context, key string) error
-
+	// Save 保存会话
+	Save(ctx context.Context, session *Session) error
+	// Get 获取会话
+	Get(ctx context.Context, tokenID string) (*Session, error)
+	// Delete 删除会话
+	Delete(ctx context.Context, tokenID string) error
+	// Refresh 刷新会话过期时间
+	Refresh(ctx context.Context, tokenID string, newExpiration time.Time) error
 	// Close 关闭存储连接
-	Close() error
+	Close(ctx context.Context) error
+	// Ping 检查存储是否可用
+	Ping(ctx context.Context) error
 }
 
 // Options 存储配置选项

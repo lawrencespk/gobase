@@ -7,6 +7,7 @@ import (
 
 	"gobase/pkg/client/redis"
 	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 	"gobase/pkg/logger/types"
 	"gobase/pkg/trace/jaeger"
 )
@@ -20,6 +21,19 @@ type RedisStore struct {
 
 // NewRedisStore 创建Redis存储实例
 func NewRedisStore(client redis.Client, opts *Options) *RedisStore {
+	if client == nil {
+		panic("redis client cannot be nil")
+	}
+	if opts == nil {
+		opts = &Options{
+			KeyPrefix: "session:",
+			Log:       &types.NoopLogger{},
+		}
+	}
+	if opts.Log == nil {
+		opts.Log = &types.NoopLogger{}
+	}
+
 	return &RedisStore{
 		client: client,
 		prefix: opts.KeyPrefix + "session:",
@@ -39,7 +53,7 @@ func (s *RedisStore) Save(ctx context.Context, session *Session) error {
 	}
 
 	// 计算过期时间
-	expiration := session.ExpiresAt.Sub(time.Now())
+	expiration := time.Until(session.ExpiresAt)
 	if expiration <= 0 {
 		return errors.NewSessionExpiredError("session already expired", nil)
 	}
@@ -69,8 +83,19 @@ func (s *RedisStore) Save(ctx context.Context, session *Session) error {
 }
 
 // Close 实现 Store 接口
-func (s *RedisStore) Close() error {
-	return s.client.Close()
+func (s *RedisStore) Close(ctx context.Context) error {
+	span, ctx := jaeger.StartSpanFromContext(ctx, "RedisStore.Close")
+	defer span.Finish()
+
+	if err := s.client.Close(); err != nil {
+		if s.logger != nil {
+			s.logger.Error(ctx, "Failed to close redis connection",
+				types.Field{Key: "error", Value: err},
+			)
+		}
+		return errors.NewCacheError("failed to close redis connection", err)
+	}
+	return nil
 }
 
 // Delete 实现 Store 接口的 Delete 方法
@@ -86,17 +111,27 @@ func (s *RedisStore) Delete(ctx context.Context, sessionID string) error {
 }
 
 // Get 实现 Store 接口的 Get 方法
-func (s *RedisStore) Get(ctx context.Context, key string) (string, error) {
+func (s *RedisStore) Get(ctx context.Context, key string) (*Session, error) {
 	span, ctx := jaeger.StartSpanFromContext(ctx, "RedisStore.Get")
 	defer span.Finish()
 
-	// 直接返回字符串数据，不做反序列化
+	// 获取字符串数据
 	val, err := s.client.Get(ctx, s.prefix+key)
 	if err != nil {
-		return "", errors.NewCacheError("failed to get value", err)
+		// 保持原始的 RedisKeyNotFoundError
+		if errors.HasErrorCode(err, codes.RedisKeyNotFoundError) {
+			return nil, err
+		}
+		return nil, errors.NewCacheError("failed to get value", err)
 	}
 
-	return val, nil
+	// 反序列化会话数据
+	var session Session
+	if err := json.Unmarshal([]byte(val), &session); err != nil {
+		return nil, errors.NewSerializationError("failed to unmarshal session", err)
+	}
+
+	return &session, nil
 }
 
 // Set 实现 Store 接口的 Set 方法
@@ -109,6 +144,54 @@ func (s *RedisStore) Set(ctx context.Context, key string, value string, expirati
 		return errors.NewCacheError("failed to set value", err)
 	}
 	return nil
+}
+
+// Ping 实现 Store 接口的 Ping 方法
+func (s *RedisStore) Ping(ctx context.Context) error {
+	span, ctx := jaeger.StartSpanFromContext(ctx, "RedisStore.Ping")
+	defer span.Finish()
+
+	if s.client == nil {
+		return errors.NewCacheError("redis client is nil", nil)
+	}
+
+	if err := s.client.Ping(ctx); err != nil {
+		if s.logger != nil {
+			s.logger.Error(ctx, "Failed to ping redis",
+				types.Field{Key: "error", Value: err},
+			)
+		}
+		return errors.NewCacheError("failed to ping redis", err)
+	}
+	return nil
+}
+
+// Refresh 实现 Store 接口的 Refresh 方法
+func (s *RedisStore) Refresh(ctx context.Context, tokenID string, newExpiration time.Time) error {
+	span, ctx := jaeger.StartSpanFromContext(ctx, "RedisStore.Refresh")
+	defer span.Finish()
+
+	// 获取现有会话
+	session, err := s.Get(ctx, tokenID)
+	if err != nil {
+		return err
+	}
+
+	// 更新过期时间
+	session.ExpiresAt = newExpiration
+	session.UpdatedAt = time.Now()
+
+	// 保存更新后的会话
+	return s.Save(ctx, session)
+}
+
+// IsRedisKeyNotFoundError 检查是否为Redis键不存在错误
+func IsRedisKeyNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// 使用我们的错误包来检查错误码
+	return errors.HasErrorCode(err, codes.RedisKeyNotFoundError)
 }
 
 // ... 其他方法实现 ...

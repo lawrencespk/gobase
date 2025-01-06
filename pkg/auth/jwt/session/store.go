@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"gobase/pkg/client/redis"
@@ -64,34 +63,28 @@ func NewSessionStore(opts *Options, logger types.Logger) (*SessionStore, error) 
 }
 
 // Save 保存会话数据
-func (s *SessionStore) Save(ctx context.Context, sessionID string, session *Session) error {
+func (s *SessionStore) Save(ctx context.Context, session *Session) error {
 	span, ctx := jaeger.StartSpanFromContext(ctx, "SessionStore.Save")
 	defer span.Finish()
 
-	if s.metrics != nil {
-		defer s.metrics.Inc()
-	}
-
-	// 计算过期时间
-	expiration := session.ExpiresAt.Sub(time.Now())
-	if expiration <= 0 {
-		s.logger.Error(ctx, "session already expired",
-			types.Field{Key: "session_id", Value: sessionID},
-			types.Field{Key: "expires_at", Value: session.ExpiresAt})
-		return errors.NewError(codes.ValidationError, "session already expired", nil)
-	}
-
-	// 使用 Set 方法来处理序列化和存储
-	if err := s.Set(ctx, sessionID, session, expiration); err != nil {
-		s.logger.Error(ctx, "failed to save session",
-			types.Field{Key: "session_id", Value: sessionID},
-			types.Field{Key: "error", Value: err})
+	// 验证会话
+	if err := s.validateSession(session); err != nil {
 		return err
 	}
 
-	s.logger.Debug(ctx, "session saved",
-		types.Field{Key: "session_id", Value: sessionID},
-		types.Field{Key: "expiration", Value: expiration})
+	// 计算过期时间
+	expiration := time.Until(session.ExpiresAt)
+	if expiration <= 0 {
+		return errors.NewSessionExpiredError("session already expired", nil)
+	}
+
+	// 保存会话数据
+	if err := s.store.Save(ctx, session); err != nil {
+		s.logger.Error(ctx, "failed to save session",
+			types.Field{Key: "token_id", Value: session.TokenID},
+			types.Field{Key: "error", Value: err})
+		return err
+	}
 
 	return nil
 }
@@ -106,21 +99,12 @@ func (s *SessionStore) Load(ctx context.Context, sessionID string) (*Session, er
 	}
 
 	// 获取会话数据
-	data, err := s.store.Get(ctx, sessionID)
+	session, err := s.store.Get(ctx, sessionID)
 	if err != nil {
 		s.logger.Error(ctx, "failed to load session",
 			types.Field{Key: "error", Value: err},
 			types.Field{Key: "session_id", Value: sessionID})
 		return nil, err
-	}
-
-	// 反序列化会话数据
-	var session Session
-	if err := json.Unmarshal([]byte(data), &session); err != nil {
-		s.logger.Error(ctx, "failed to unmarshal session data",
-			types.Field{Key: "error", Value: err},
-			types.Field{Key: "session_id", Value: sessionID})
-		return nil, errors.NewError(codes.SerializationError, "failed to unmarshal session data", err)
 	}
 
 	// 检查会话是否过期
@@ -131,10 +115,7 @@ func (s *SessionStore) Load(ctx context.Context, sessionID string) (*Session, er
 		return nil, errors.NewSessionExpiredError("session expired", nil)
 	}
 
-	s.logger.Debug(ctx, "session loaded",
-		types.Field{Key: "session_id", Value: sessionID},
-		types.Field{Key: "expiration", Value: session.ExpiresAt.Sub(time.Now())})
-	return &session, nil
+	return session, nil
 }
 
 // Delete 删除会话数据
@@ -160,8 +141,8 @@ func (s *SessionStore) Delete(ctx context.Context, sessionID string) error {
 }
 
 // Close 关闭存储连接
-func (s *SessionStore) Close() error {
-	return s.store.Close()
+func (s *SessionStore) Close(ctx context.Context) error {
+	return s.store.Close(ctx)
 }
 
 // Get 加载会话数据
@@ -169,22 +150,13 @@ func (s *SessionStore) Get(ctx context.Context, sessionID string) (*Session, err
 	span, ctx := jaeger.StartSpanFromContext(ctx, "SessionStore.Get")
 	defer span.Finish()
 
-	// 获取原始数据
-	data, err := s.store.Get(ctx, sessionID)
+	// 获取会话数据
+	session, err := s.store.Get(ctx, sessionID)
 	if err != nil {
 		s.logger.Error(ctx, "failed to get session",
 			types.Field{Key: "error", Value: err},
 			types.Field{Key: "session_id", Value: sessionID})
 		return nil, err
-	}
-
-	// 反序列化会话数据
-	var session Session
-	if err := json.Unmarshal([]byte(data), &session); err != nil {
-		s.logger.Error(ctx, "failed to unmarshal session data",
-			types.Field{Key: "error", Value: err},
-			types.Field{Key: "session_id", Value: sessionID})
-		return nil, errors.NewError(codes.SerializationError, "failed to unmarshal session data", err)
 	}
 
 	// 检查会话是否过期
@@ -195,29 +167,70 @@ func (s *SessionStore) Get(ctx context.Context, sessionID string) (*Session, err
 		return nil, errors.NewSessionExpiredError("session expired", nil)
 	}
 
-	return &session, nil
+	return session, nil
 }
 
-// Set 设置会话数据
+// Set 设置会话数据 (将被废弃，请使用 Save)
 func (s *SessionStore) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	span, ctx := jaeger.StartSpanFromContext(ctx, "SessionStore.Set")
 	defer span.Finish()
 
-	// 序列化数据
-	data, err := json.Marshal(value)
-	if err != nil {
-		s.logger.Error(ctx, "failed to marshal session data",
-			types.Field{Key: "error", Value: err},
-			types.Field{Key: "key", Value: key})
-		return errors.NewError(codes.SerializationError, "failed to marshal session data", err)
+	session, ok := value.(*Session)
+	if !ok {
+		return errors.NewValidationError("value must be *Session", nil)
 	}
 
-	// 保存会话数据
-	if err := s.store.Set(ctx, key, string(data), ttl); err != nil {
-		s.logger.Error(ctx, "failed to save session",
-			types.Field{Key: "key", Value: key},
-			types.Field{Key: "error", Value: err})
+	return s.Save(ctx, session)
+}
+
+func (s *SessionStore) Refresh(ctx context.Context, tokenID string, newExpiration time.Time) error {
+	span, ctx := jaeger.StartSpanFromContext(ctx, "SessionStore.Refresh")
+	defer span.Finish()
+
+	// 获取会话
+	session, err := s.Get(ctx, tokenID)
+	if err != nil {
 		return err
+	}
+
+	// 更新过期时间
+	session.ExpiresAt = newExpiration
+	session.UpdatedAt = time.Now()
+
+	// 计算新的过期时间
+	expiration := time.Until(newExpiration)
+	if expiration <= 0 {
+		return errors.NewSessionExpiredError("new expiration time is in the past", nil)
+	}
+
+	// 保存更新后的会话
+	return s.Save(ctx, session)
+}
+
+// validateSession 验证会话数据的有效性
+func (s *SessionStore) validateSession(session *Session) error {
+	if session == nil {
+		return errors.NewValidationError("session cannot be nil", nil)
+	}
+
+	if session.UserID == "" {
+		return errors.NewValidationError("user id cannot be empty", nil)
+	}
+
+	if session.TokenID == "" {
+		return errors.NewValidationError("token id cannot be empty", nil)
+	}
+
+	if session.ExpiresAt.IsZero() {
+		return errors.NewValidationError("expiration time cannot be zero", nil)
+	}
+
+	if session.CreatedAt.IsZero() {
+		session.CreatedAt = time.Now()
+	}
+
+	if session.UpdatedAt.IsZero() {
+		session.UpdatedAt = session.CreatedAt
 	}
 
 	return nil

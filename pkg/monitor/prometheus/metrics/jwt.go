@@ -17,6 +17,12 @@ type JWTMetrics struct {
 
 	// TokenErrors Token错误计数
 	TokenErrors *metric.Counter
+
+	// SessionOperations 会话操作耗时指标
+	SessionOperations *metric.Histogram
+
+	// SessionErrors 会话操作错误计数
+	SessionErrors *metric.Counter
 }
 
 var (
@@ -58,6 +64,21 @@ func NewJWTMetrics() *JWTMetrics {
 			Name:      "token_errors_total",
 			Help:      "Total number of JWT token errors",
 		}).WithLabels("operation", "error"),
+
+		// 添加会话操作指标
+		SessionOperations: metric.NewHistogram(metric.HistogramOpts{
+			Namespace: "gobase",
+			Subsystem: "jwt",
+			Name:      "session_duration_seconds",
+			Help:      "Duration of session operations in seconds",
+		}).WithLabels("operation"),
+
+		SessionErrors: metric.NewCounter(metric.CounterOpts{
+			Namespace: "gobase",
+			Subsystem: "jwt",
+			Name:      "session_errors_total",
+			Help:      "Total number of session operation errors",
+		}).WithLabels("operation"),
 	}
 
 	// 注册指标
@@ -85,6 +106,19 @@ func NewJWTMetrics() *JWTMetrics {
 		}
 	}
 
+	// 注册新增的会话指标
+	if err := m.SessionOperations.Register(); err != nil {
+		if err.Error() != "duplicate metrics collector registration attempted" {
+			panic(err)
+		}
+	}
+
+	if err := m.SessionErrors.Register(); err != nil {
+		if err.Error() != "duplicate metrics collector registration attempted" {
+			panic(err)
+		}
+	}
+
 	return m
 }
 
@@ -106,6 +140,19 @@ func NewTokenMetrics() *JWTMetrics {
 			Name:      "token_errors_total",
 			Help:      "Total number of token errors",
 		}).WithLabels("operation", "reason"),
+
+		// 添加会话操作指标
+		SessionOperations: metric.NewHistogram(metric.HistogramOpts{
+			Namespace: "jwt",
+			Name:      "session_duration_seconds",
+			Help:      "Duration of session operations in seconds",
+		}).WithLabels("operation"),
+
+		SessionErrors: metric.NewCounter(metric.CounterOpts{
+			Namespace: "jwt",
+			Name:      "session_errors_total",
+			Help:      "Total number of session operation errors",
+		}).WithLabels("operation"),
 	}
 
 	// 注册所有指标
@@ -133,6 +180,20 @@ func (m *JWTMetrics) registerMetrics() error {
 
 	// 注册 TokenErrors
 	if err := m.TokenErrors.Register(); err != nil {
+		if err.Error() != "duplicate metrics collector registration attempted" {
+			return err
+		}
+	}
+
+	// 注册 SessionOperations
+	if err := m.SessionOperations.Register(); err != nil {
+		if err.Error() != "duplicate metrics collector registration attempted" {
+			return err
+		}
+	}
+
+	// 注册 SessionErrors
+	if err := m.SessionErrors.Register(); err != nil {
 		if err.Error() != "duplicate metrics collector registration attempted" {
 			return err
 		}
