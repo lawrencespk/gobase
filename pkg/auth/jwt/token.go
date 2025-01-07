@@ -95,20 +95,30 @@ func (tm *TokenManager) GenerateToken(ctx context.Context, claims Claims) (strin
 		}
 	}()
 
-	// 验证claims
-	if err := claims.Validate(); err != nil {
-		if tm.metrics {
-			metrics.DefaultJWTMetrics.TokenErrors.WithLabelValues("generate", err.Error()).Inc()
-		}
+	// 验证必要字段
+	if claims.GetUserID() == "" {
+		return "", errors.NewError(codes.TokenGenerationError, "user_id is required", nil)
 	}
 
+	if claims.GetTokenType() == "" {
+		return "", errors.NewError(codes.TokenGenerationError, "token_type is required", nil)
+	}
+
+	// 验证过期时间
+	if exp := claims.GetExpiresAt(); !exp.IsZero() && exp.Before(time.Now()) {
+		return "", errors.NewError(codes.TokenExpired, "token is expired", nil)
+	}
+
+	// 创建token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// 签名token
 	tokenString, err := token.SignedString(tm.secretKey)
 	if err != nil {
 		if tm.metrics {
 			metrics.DefaultJWTMetrics.TokenErrors.WithLabelValues("generate", err.Error()).Inc()
 		}
-		return "", errors.NewTokenGenerationError("failed to generate token", err)
+		return "", errors.NewError(codes.TokenSignFailed, "failed to sign token", err)
 	}
 
 	return tokenString, nil
