@@ -32,6 +32,14 @@ GoBase 是一个模块化的 Go 语言基础框架包,提供了构建企业级�
 ### [Context 中间件](/pkg/middleware/context/README.md)
 提供请求上下文管理,支持请求ID注入、元数据传递等功能。
 
+### [JWT 中间件](/pkg/middleware/jwt/README.md)
+JWT认证中间件,提供:
+- 令牌验证和解析
+- Context操作API
+- 自定义Claims扩展
+- 用户身份与权限管理
+- 性能优异(0.156ms/请求)
+
 ### [Ratelimit 中间件](/pkg/middleware/ratelimit/README.md)
 HTTP 请求限流中间件,支持多种限流算法和分布式限流。
 
