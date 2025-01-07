@@ -100,6 +100,11 @@ func NewTokenGenerationError(message string, cause error) types.Error {
 	return NewError(codes.TokenGenerationError, message, cause)
 }
 
+// NewTokenBlacklistError 创建Token黑名单错误
+func NewTokenBlacklistError(message string, cause error) types.Error {
+	return NewError(codes.TokenBlacklistError, message, cause)
+}
+
 // IsTokenExpiredError 判断是否为Token过期错误
 func IsTokenExpiredError(err error) bool {
 	if e, ok := err.(types.Error); ok {

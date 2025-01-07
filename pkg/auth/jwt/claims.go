@@ -5,6 +5,9 @@ import (
 
 	"gobase/pkg/errors"
 
+	"context"
+
+	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -241,4 +244,65 @@ func WithAudience(audience []string) ClaimsOption {
 	return func(c *StandardClaims) {
 		c.Audience = audience
 	}
+}
+
+// contextKey 定义用于context的key类型
+type contextKey struct{}
+
+const (
+	// ginContextKey 定义在gin.Context中存储Claims的键
+	ginContextKey = "jwt_claims"
+)
+
+var (
+	// claimsContextKey 定义在context.Context中存储Claims的键
+	claimsContextKey = contextKey{}
+)
+
+// FromContext 从context中获取Claims
+func FromContext(ctx interface{}) (Claims, bool) {
+	// 支持 gin.Context
+	if c, ok := ctx.(*gin.Context); ok {
+		value, exists := c.Get(ginContextKey)
+		if !exists {
+			return nil, false
+		}
+		claims, ok := value.(Claims)
+		return claims, ok
+	}
+
+	// 支持 context.Context
+	if c, ok := ctx.(context.Context); ok {
+		value := c.Value(claimsContextKey)
+		if value == nil {
+			return nil, false
+		}
+		claims, ok := value.(Claims)
+		return claims, ok
+	}
+
+	return nil, false
+}
+
+// ToContext 将Claims存储到context中
+func ToContext(ctx interface{}, claims Claims) {
+	// 支持 gin.Context
+	if c, ok := ctx.(*gin.Context); ok {
+		c.Set(ginContextKey, claims)
+		return
+	}
+
+	// 注意：context.Context 是不可变的，需要返回新的 context
+	// 这里我们不能直接修改原始 context，而是应该由调用者处理返回值
+	switch ctx.(type) {
+	case context.Context:
+		// context.Context 的处理应该由调用者完成
+		// 例如：ctx = jwt.WithClaimsContext(ctx, claims)
+		return
+	}
+}
+
+// WithClaimsContext 返回带有Claims的新context
+func WithClaimsContext(ctx context.Context, claims Claims) context.Context {
+	return context.WithValue(ctx, claimsContextKey, claims)
 }

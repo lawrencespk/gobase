@@ -100,7 +100,6 @@ func (tm *TokenManager) GenerateToken(ctx context.Context, claims Claims) (strin
 		if tm.metrics {
 			metrics.DefaultJWTMetrics.TokenErrors.WithLabelValues("generate", err.Error()).Inc()
 		}
-		return "", err
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
