@@ -66,6 +66,15 @@ const (
 	TokenNotFound        = "2123" // Token不存在
 	TokenTypeMismatch    = "2124" // Token类型不匹配
 	TokenGenerationError = "2125" // Token生成错误
+	TokenGenFailed       = "2126" // Token生成失败
+	TokenSignFailed      = "2127" // Token签名失败
+	TokenStatusRevoked   = "2128" // Token状态已被吊销
+	TokenValidateError   = "2129" // Token验证错误
+	TokenParseError      = "2130" // Token解析错误
+	TokenSignError       = "2131" // Token签名错误
+	TokenClaimError      = "2132" // Token声明错误
+	TokenBlacklistError  = "2133" // Token黑名单错误
+	TokenStatusError     = "2134" // Token状态错误
 
 	// Claims相关错误码 (2140-2149)
 	ClaimsMissing = "2140" // Claims缺失必要字段
@@ -227,4 +236,10 @@ const (
 	StoreErrDelete   = "3403" // 存储删除错误
 	StoreErrNotFound = "3404" // 存储数据不存在
 	StoreErrAdd      = "3405" // 存储添加错误
+
+	// 限流相关错误码 (3600-3699)
+	RateLimitExceeded    = "3600" // 超出限流限制
+	RateLimitConfigError = "3601" // 限流配置错误
+	RateLimitInitError   = "3602" // 限流初始化错误
+	RateLimitStoreError  = "3603" // 限流存储错误
 )

@@ -2,6 +2,7 @@ package stress
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -136,4 +137,77 @@ func TestTokenManager_StressMemoryUsage(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+// TestTokenManager_StressClaimsValidation 测试大量Claims验证的压力
+func TestTokenManager_StressClaimsValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping stress test in short mode")
+	}
+
+	log, err := logger.NewLogger(logger.WithLevel(types.ErrorLevel))
+	require.NoError(t, err)
+
+	tm, err := jwt.NewTokenManager("test-secret",
+		jwt.WithLogger(log),
+		jwt.WithoutMetrics(),
+		jwt.WithoutTracing(),
+	)
+	require.NoError(t, err)
+
+	const (
+		numGoroutines = 50
+		numClaims     = 1000
+	)
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, numGoroutines)
+
+	// 并发生成和验证不同类型的Claims
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+
+			for j := 0; j < numClaims; j++ {
+				// 随机生成不同类型的Claims
+				claims := jwt.NewStandardClaims(
+					jwt.WithUserID(fmt.Sprintf("user-%d-%d", id, j)),
+					jwt.WithTokenType(jwt.AccessToken),
+					jwt.WithExpiresAt(time.Now().Add(time.Hour)),
+					jwt.WithRoles([]string{"user", "admin"}),
+					jwt.WithPermissions([]string{"read", "write"}),
+					jwt.WithDeviceID(fmt.Sprintf("device-%d", j)),
+					jwt.WithIPAddress(fmt.Sprintf("192.168.1.%d", j%255)),
+				)
+
+				// 验证Claims
+				if err := claims.Validate(); err != nil {
+					errCh <- err
+					return
+				}
+
+				// 生成token
+				token, err := tm.GenerateToken(context.Background(), claims)
+				if err != nil {
+					errCh <- err
+					return
+				}
+
+				// 验证token
+				_, err = tm.ValidateToken(context.Background(), token)
+				if err != nil {
+					errCh <- err
+					return
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("unexpected error: %v", err)
+	}
 }

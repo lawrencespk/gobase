@@ -23,6 +23,12 @@ type JWTMetrics struct {
 
 	// SessionErrors 会话操作错误计数
 	SessionErrors *metric.Counter
+
+	// TokenValidateSuccess Token验证成功计数
+	TokenValidateSuccess *metric.Counter
+
+	// TokenValidateFailure Token验证失败计数
+	TokenValidateFailure *metric.Counter
 }
 
 var (
@@ -79,6 +85,20 @@ func NewJWTMetrics() *JWTMetrics {
 			Name:      "session_errors_total",
 			Help:      "Total number of session operation errors",
 		}).WithLabels("operation"),
+
+		TokenValidateSuccess: metric.NewCounter(metric.CounterOpts{
+			Namespace: "gobase",
+			Subsystem: "jwt",
+			Name:      "token_validate_success_total",
+			Help:      "Total number of successful token validations",
+		}),
+
+		TokenValidateFailure: metric.NewCounter(metric.CounterOpts{
+			Namespace: "gobase",
+			Subsystem: "jwt",
+			Name:      "token_validate_failure_total",
+			Help:      "Total number of failed token validations",
+		}),
 	}
 
 	// 注册指标

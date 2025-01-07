@@ -37,6 +37,10 @@ type Claims interface {
 	GetTokenID() string
 	// 验证Claims
 	Validate() error
+	// 设置过期时间
+	SetExpiresAt(time.Time)
+	// 获取过期时间
+	GetExpiresAt() time.Time
 }
 
 // StandardClaims 标准Claims实现
@@ -130,6 +134,19 @@ func (c *StandardClaims) Validate() error {
 	}
 
 	return nil
+}
+
+// SetExpiresAt 实现Claims接口的SetExpiresAt方法
+func (c *StandardClaims) SetExpiresAt(t time.Time) {
+	c.ExpiresAt = jwt.NewNumericDate(t)
+}
+
+// GetExpiresAt 获取过期时间
+func (c *StandardClaims) GetExpiresAt() time.Time {
+	if c.ExpiresAt == nil {
+		return time.Time{}
+	}
+	return c.ExpiresAt.Time
 }
 
 // ClaimsOption Claims配置选项

@@ -36,6 +36,11 @@ func (m *mockClaims) GetExpirationTime() (*jwtv5.NumericDate, error) {
 	return jwtv5.NewNumericDate(m.expiresAt), nil
 }
 
+// 新增: 实现 SetExpiresAt 方法
+func (m *mockClaims) SetExpiresAt(exp time.Time) {
+	m.expiresAt = exp
+}
+
 func (m *mockClaims) GetIssuedAt() (*jwtv5.NumericDate, error)  { return nil, nil }
 func (m *mockClaims) GetNotBefore() (*jwtv5.NumericDate, error) { return nil, nil }
 func (m *mockClaims) GetIssuer() (string, error)                { return "", nil }
@@ -61,6 +66,11 @@ func (m *mockClaims) Validate() error {
 		return jwt.ErrClaimsExpired
 	}
 	return nil
+}
+
+// 添加 GetExpiresAt 方法实现
+func (m *mockClaims) GetExpiresAt() time.Time {
+	return m.expiresAt
 }
 
 func TestTokenValidator_ValidateToken(t *testing.T) {

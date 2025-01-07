@@ -27,6 +27,11 @@ type TestClaims struct {
 	TokenID                string        `json:"token_id"`
 }
 
+// 新增: 实现 SetExpiresAt 方法
+func (c *TestClaims) SetExpiresAt(exp time.Time) {
+	c.RegisteredClaims.ExpiresAt = jwtv5.NewNumericDate(exp)
+}
+
 // 实现 jwt.Claims 接口
 func (c *TestClaims) GetUserID() string           { return c.UserID }
 func (c *TestClaims) GetUserName() string         { return c.UserName }
@@ -37,6 +42,14 @@ func (c *TestClaims) GetIPAddress() string        { return c.IPAddress }
 func (c *TestClaims) GetTokenType() jwt.TokenType { return c.TokenType }
 func (c *TestClaims) GetTokenID() string          { return c.TokenID }
 func (c *TestClaims) Validate() error             { return nil }
+
+// 修改 GetExpiresAt 方法实现
+func (c *TestClaims) GetExpiresAt() time.Time {
+	if c.RegisteredClaims.ExpiresAt == nil {
+		return time.Time{}
+	}
+	return c.RegisteredClaims.ExpiresAt.Time
+}
 
 // newTestClaims 创建测试用Claims
 func newTestClaims(userID, deviceID string) *TestClaims {

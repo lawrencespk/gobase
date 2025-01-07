@@ -66,3 +66,44 @@ func BenchmarkTokenManager_ValidateToken(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkStandardClaims_Validate 测试Claims验证性能
+func BenchmarkStandardClaims_Validate(b *testing.B) {
+	claims := jwt.NewStandardClaims(
+		jwt.WithUserID("test-user"),
+		jwt.WithUserName("Test User"),
+		jwt.WithTokenType(jwt.AccessToken),
+		jwt.WithExpiresAt(time.Now().Add(time.Hour)),
+		jwt.WithRoles([]string{"user", "admin"}),
+		jwt.WithPermissions([]string{"read", "write"}),
+		jwt.WithDeviceID("device-123"),
+		jwt.WithIPAddress("192.168.1.1"),
+	)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_ = claims.Validate()
+		}
+	})
+}
+
+// BenchmarkToken_SignedString 测试token签名性能
+func BenchmarkToken_SignedString(b *testing.B) {
+	claims := jwt.NewStandardClaims(
+		jwt.WithUserID("test-user"),
+		jwt.WithTokenType(jwt.AccessToken),
+		jwt.WithExpiresAt(time.Now().Add(time.Hour)),
+	)
+	token, _ := jwt.NewToken(
+		jwt.WithClaims(claims),
+		jwt.WithSecret("test-secret"),
+	)
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = token.SignedString()
+		}
+	})
+}

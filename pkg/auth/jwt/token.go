@@ -10,6 +10,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"gobase/pkg/errors"
+	"gobase/pkg/errors/codes"
 	errorTypes "gobase/pkg/errors/types"
 	"gobase/pkg/logger"
 	"gobase/pkg/logger/types"
@@ -228,4 +229,151 @@ func (tm *TokenManager) HandleValidationError(tokenErr error) error {
 	}
 
 	return err
+}
+
+// Token JWT令牌结构
+type Token struct {
+	token      *jwt.Token
+	claims     Claims
+	secret     string
+	expiration time.Duration
+	validate   bool
+}
+
+// NewToken 创建新的JWT token
+func NewToken(opts ...TokenOption) (*Token, error) {
+	t := &Token{}
+	for _, opt := range opts {
+		opt(t)
+	}
+
+	if t.claims == nil {
+		return nil, errors.NewError(codes.TokenGenerationError, "claims is required", nil)
+	}
+
+	// 创建JWT token
+	t.token = jwt.NewWithClaims(jwt.SigningMethodHS256, t.claims)
+
+	return t, nil
+}
+
+// ParseToken 解析JWT token
+func ParseToken(tokenString string, opts ...TokenOption) (*Token, error) {
+	t := &Token{}
+	for _, opt := range opts {
+		opt(t)
+	}
+
+	if t.secret == "" {
+		return nil, errors.NewError(codes.TokenInvalid, "secret is required", nil)
+	}
+
+	// 解析token
+	token, err := jwt.ParseWithClaims(tokenString, &StandardClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return []byte(t.secret), nil
+	})
+
+	if err != nil {
+		return nil, errors.NewError(codes.TokenInvalid, "failed to parse token", err)
+	}
+
+	t.token = token
+	t.claims = token.Claims.(*StandardClaims)
+
+	return t, nil
+}
+
+// SignedString 获取签名后的token字符串
+func (t *Token) SignedString() (string, error) {
+	if t.secret == "" {
+		return "", errors.NewError(codes.TokenSignFailed, "secret is required", nil)
+	}
+	return t.token.SignedString([]byte(t.secret))
+}
+
+// Claims 获取token的claims
+func (t *Token) Claims() Claims {
+	return t.claims
+}
+
+// TokenOption token配置选项
+type TokenOption func(*Token)
+
+// WithClaims 设置claims
+func WithClaims(claims Claims) TokenOption {
+	return func(t *Token) {
+		t.claims = claims
+	}
+}
+
+// WithSecret 设置密钥
+func WithSecret(secret string) TokenOption {
+	return func(t *Token) {
+		t.secret = secret
+	}
+}
+
+// WithExpiration 设置过期时间
+func WithExpiration(exp time.Duration) TokenOption {
+	return func(t *Token) {
+		t.expiration = exp
+	}
+}
+
+// 添加错误检查函数
+func IsTokenExpiredError(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, jwt.ErrTokenExpired):
+		return true
+	default:
+		return false
+	}
+}
+
+func IsSignatureInvalidError(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, jwt.ErrSignatureInvalid):
+		return true
+	default:
+		return false
+	}
+}
+
+// 添加 WithValidation 选项
+func WithValidation(validate bool) TokenOption {
+	return func(t *Token) {
+		t.validate = validate
+	}
+}
+
+// 添加带上下文的解析函数
+func ParseTokenWithContext(ctx context.Context, tokenString string, opts ...TokenOption) (*Token, error) {
+	t := &Token{}
+	for _, opt := range opts {
+		opt(t)
+	}
+
+	if t.secret == "" {
+		return nil, errors.NewError(codes.TokenInvalid, "secret is required", nil)
+	}
+
+	// 解析token
+	token, err := jwt.ParseWithClaims(tokenString, &StandardClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return []byte(t.secret), nil
+	})
+
+	if err != nil {
+		return nil, errors.NewError(codes.TokenInvalid, "failed to parse token", err)
+	}
+
+	t.token = token
+	t.claims = token.Claims.(*StandardClaims)
+
+	return t, nil
 }

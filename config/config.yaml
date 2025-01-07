@@ -1,0 +1,211 @@
+app:
+  name: gobase
+  version: 1.0.0
+  mode: development
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  timeout: 30s
+
+logger:
+  development: false
+  level: "info"              # debug, info, warn, error
+  format: "text"            # text, json
+  reportCaller: true
+  timeFormat: "RFC3339"
+  disableConsole: false
+  outputPaths:
+    - "stdout"
+  errorOutputPaths:
+    - "stderr"
+  maxAge: "168h"            # 7天，日志保留时间
+  rotationTime: "24h"       # 日志轮转时间
+  maxSize: 100             # 单个日志文件最大大小(MB)
+  rotation:
+    enable: true
+    filename: "logs/app.log"
+    maxSize: 100            # MB
+    maxAge: 7              # days
+    rotationTime: "24h"
+    maxBackups: 3
+    compress: true
+  compress:
+    enable: true
+    algorithm: "gzip"
+    level: 9
+    deleteSource: true
+    interval: "1h"
+  cleanup:
+    enable: true
+    maxBackups: 3
+    maxAge: 7
+    interval: "24h"
+  async:
+    enable: true
+    bufferSize: 8192
+    flushInterval: "1s"
+    blockOnFull: false
+    dropOnFull: true
+    flushOnExit: true
+  recovery:
+    enable: true
+    maxRetries: 3
+    retryInterval: "1s"
+    enableStackTrace: true
+    maxStackSize: 4096
+  queue:
+    maxSize: 1000
+    batchSize: 100
+    workers: 1
+    flushInterval: "1s"
+    retryCount: 3
+    retryInterval: "1s"
+    maxBatchWait: "5s"
+    shutdownTimeout: "10s"
+  elk:
+    enable: false
+
+elk:
+  addresses:
+    - "http://202.182.123.251:9200"
+  username: "elastic"
+  password: "VjHV1tlXuq"
+  index: "logs"
+  timeout: 30
+  bulk:
+    batchSize: 1000
+    flushBytes: 5242880  # 5MB
+    interval: 30s
+
+database:
+  postgres:
+    host: 104.238.161.243
+    port: 9187
+    user: stagingserv
+    password: wY5B6ZyifiyjtK24
+    dbname: stagingserv
+    sslmode: disable
+    timeout: "30s"
+
+redis:
+  # 基础配置
+  addresses: 
+    - "104.238.161.243:6379"  # 保持原有地址
+  username: ""                 # 保持为空
+  password: ""                 # 保持为空
+  database: 0                 # 对应原有的 db: 0
+
+  # 连接池配置
+  poolSize: 10               # 默认连接池大小
+  maxRetries: 3             # 最大重试次数
+
+  # 超时配置
+  dialTimeout: 5s           # 连接超时
+  readTimeout: 3s           # 读取超时
+  writeTimeout: 3s          # 写入超时
+
+  # 监控配置
+  enableMetrics: true       # 启用监控
+  enableTracing: true       # 启用链路追踪
+
+kafka:
+  brokers:
+    - localhost:9092
+  topic: gobase
+
+consul:
+  addr: localhost:8500
+  token: ""
+
+jaeger:
+  enable: true
+  service_name: "gobase"
+  agent:
+    host: "localhost"
+    port: "6831"
+  collector:
+    endpoint: "http://localhost:14268/api/traces"
+    username: ""
+    password: ""
+    timeout: 5s
+  sampler:
+    type: "const"
+    param: 1
+    server_url: "http://localhost:5778/sampling"
+    max_operations: 2000
+    refresh_interval: 60
+    rate_limit: 100
+    adaptive: false
+  tags:
+    environment: "development"
+  buffer:
+    enable: true
+    size: 1000
+    flush_interval: 1s
+
+nacos:
+  endpoints:
+    - "127.0.0.1:8848"
+  namespace: "public"      # 命名空间
+  group: "DEFAULT_GROUP"   # 配置分组
+  data_id: "gobase"       # 配置ID
+  username: "nacos"       # 用户名
+  password: "nacos"       # 密码
+  timeout_ms: 5000        # 超时时间(毫秒)
+  log_dir: "logs/nacos"   # 日志目录
+  cache_dir: "cache/nacos" # 缓存目录
+  log_level: "info"       # 日志级别
+  scheme: "http"          # 协议(http/https)
+  enable_auth: true       # 是否启用认证
+  access_key: ""          # 访问密钥(可选)
+  secret_key: ""          # 密钥(可选)
+
+middleware:
+  logger:
+    enable: true
+    level: "info"
+    format: "json"
+    sample_rate: 1.0
+    slow_threshold: 200
+    request_body_limit: 1024
+    response_body_limit: 1024
+    skip_paths:
+      - "/health"
+      - "/metrics"
+    metrics:
+      enable: true
+      prefix: "http_request"
+      labels:
+        app: "gobase"
+      enable_latency_histogram: true
+      enable_size_histogram: true
+      buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+    trace:
+      enable: true
+      sampler_type: "const"
+      sampler_param: 1
+      tags:
+        app: "gobase"
+    rotate:
+      enable: true
+      max_size: 100
+      max_age: 7
+      max_backups: 5
+      compress: true
+      file_path: "./logs/app.log"
+    buffer:
+      enable: true
+      size: 4096
+      flush_interval: 1000
+      flush_on_error: true
+
+grafana:
+  dashboards:
+    http: ${HTTP_DASHBOARD_PATH}
+    logger: ${LOGGER_DASHBOARD_PATH}
+    runtime: ${RUNTIME_DASHBOARD_PATH}
+    system: ${SYSTEM_DASHBOARD_PATH}
+    redis: ${REDIS_DASHBOARD_PATH}
+  alerts:
+    rules: ${ALERT_RULES_PATH}

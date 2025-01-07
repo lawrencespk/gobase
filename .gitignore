@@ -58,3 +58,5 @@ Thumbs.db
 # Document files
 .Document
 
+# backup files
+.bak

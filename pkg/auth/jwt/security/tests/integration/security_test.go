@@ -39,6 +39,11 @@ type testClaims struct {
 	subject     string
 }
 
+// 新增: 实现 SetExpiresAt 方法
+func (c *testClaims) SetExpiresAt(exp time.Time) {
+	c.expiresAt = exp
+}
+
 // 实现 Claims 接口的所有必需方法
 func (c *testClaims) GetUserID() string              { return c.userID }
 func (c *testClaims) GetUserName() string            { return c.userName }
@@ -67,6 +72,9 @@ func (c *testClaims) GetSubject() (string, error) {
 	return c.subject, nil
 }
 func (c *testClaims) Validate() error { return nil }
+func (c *testClaims) GetExpiresAt() time.Time {
+	return c.expiresAt
+}
 
 func TestSecurity_Integration(t *testing.T) {
 	// 设置测试环境
